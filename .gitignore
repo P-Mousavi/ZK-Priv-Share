@@ -11,5 +11,4 @@ coverage/
 .cache/
 .env.local
 .env.*.local
-docs/Priv-share.pdf
 package-lock.json
