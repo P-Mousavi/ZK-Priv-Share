@@ -1,0 +1,95 @@
+#!/usr/bin/env bash
+set -e
+
+# Help function
+show_help() {
+    cat << EOF
+Usage: $0 -c CIRCUIT_NAME -i INPUT_JSON
+
+Build a Circom circuit with Groth16 proof generation.
+
+Options:
+    -c CIRCUIT_NAME    Name of the circuit (without .circom extension)
+    -i INPUT_JSON      Path to the input JSON file
+    -h                 Show this help message
+
+Example:
+    $0 -c merkleProof -i input.json
+EOF
+    exit 0
+}
+
+# Parse command line arguments
+CIRCUIT=""
+INPUT_JSON=""
+
+while getopts "c:i:h" opt; do
+    case $opt in
+        c)
+            CIRCUIT="$OPTARG"
+            ;;
+        i)
+            INPUT_JSON="$OPTARG"
+            ;;
+        h)
+            show_help
+            ;;
+        \?)
+            echo "Invalid option: -$OPTARG" >&2
+            show_help
+            ;;
+    esac
+done
+
+# Check if required arguments are provided
+if [ -z "$CIRCUIT" ] || [ -z "$INPUT_JSON" ]; then
+    echo "Error: Both -c and -i arguments are required." >&2
+    echo ""
+    show_help
+fi
+
+CWD=$(dirname "${BASH_SOURCE[0]}")/../circuits
+cd $CWD
+
+echo ">>> Cleaning previous build..."
+rm -rf build *.zkey pot*.ptau witness.wtns proof.json public.json verification_key.json 2>/dev/null
+
+mkdir -p build
+
+echo ">>> Compiling circuit..."
+# IMPORTANT: add include path for circomlib, adjust if needed
+circom $CIRCUIT.circom --r1cs --wasm --sym -o build
+
+echo ">>> R1CS info:"
+npx snarkjs r1cs info build/$CIRCUIT.r1cs
+
+echo ">>> Generating witness..."
+node build/${CIRCUIT}_js/generate_witness.js \
+    build/${CIRCUIT}_js/${CIRCUIT}.wasm $INPUT_JSON build/witness.wtns
+
+echo ">>> Setting up Powers of Tau (ptau)..."
+npx snarkjs powersoftau new bn128 12 build/pot12_0000.ptau -v
+npx snarkjs powersoftau contribute build/pot12_0000.ptau build/pot12_0001.ptau --name="first contribution" -v
+npx snarkjs powersoftau prepare phase2 build/pot12_0001.ptau build/pot12_final.ptau -v
+
+echo ">>> Groth16 setup..."
+npx snarkjs groth16 setup build/$CIRCUIT.r1cs build/pot12_final.ptau build/${CIRCUIT}_0000.zkey
+npx snarkjs zkey contribute build/${CIRCUIT}_0000.zkey build/${CIRCUIT}_final.zkey --name="key contribution" -v
+
+echo ">>> Exporting verification key..."
+npx snarkjs zkey export verificationkey build/${CIRCUIT}_final.zkey build/verification_key.json
+
+echo ">>> Generating proof..."
+npx snarkjs groth16 prove build/${CIRCUIT}_final.zkey build/witness.wtns build/proof.json build/public.json
+
+echo ">>> Verifying proof..."
+npx snarkjs groth16 verify build/verification_key.json build/public.json build/proof.json
+
+echo ">>> Generating the verifier solidity program"
+npx snarkjs zkey export solidityverifier build/${CIRCUIT}_final.zkey ../contracts/Verifier.sol
+
+echo ">>> Post-processing Verifier.sol to add 'virtual' keyword"
+# Add 'virtual' to verifyProof function to allow overriding
+sed -i '/function verifyProof.*public view returns (bool)/s/public view returns/public view virtual returns/' ../contracts/Verifier.sol
+
+echo ">>> DONE. Proof + public inputs generated."

@@ -1,0 +1,15 @@
+.env
+deployments/
+circuits/build/*
+node_modules/
+*.log
+.DS_Store
+Thumbs.db
+dist/
+build/
+coverage/
+.cache/
+.env.local
+.env.*.local
+docs/Priv-share.pdf
+package-lock.json
