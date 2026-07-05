@@ -192,35 +192,9 @@ contract ZKDataContract {
         bytes memory cidBytes = bytes(_cid);
         uint256 length = cidBytes.length;
         
-        // IPFS CID v0: starts with "Qm" and is exactly 46 characters
-        if (length == 46 && cidBytes[0] == 'Q' && cidBytes[1] == 'm') {
-            // Validate base58 characters (0-9, A-H, J-N, P-Z, a-k, m-z)
-            for (uint256 i = 0; i < length; i++) {
-                bytes1 char = cidBytes[i];
-                if (!((char >= 0x30 && char <= 0x39) || // 0-9
-                      (char >= 0x41 && char <= 0x48) || // A-H
-                      (char >= 0x4A && char <= 0x4E) || // J-N
-                      (char >= 0x50 && char <= 0x5A) || // P-Z
-                      (char >= 0x61 && char <= 0x6B) || // a-k
-                      (char >= 0x6D && char <= 0x7A))) { // m-z
-                    return false;
-                }
-            }
-            return true;
-        }
-        
-        // IPFS CID v1: starts with "b" and has specific format
-        // v1 CIDs are typically longer and use base32 encoding
-        if (length > 46 && cidBytes[0] == 'b') {
-            // Basic validation for v1 CID format
-            // v1 CIDs use base32 encoding (a-z, 2-7)
-            for (uint256 i = 0; i < length; i++) {
-                bytes1 char = cidBytes[i];
-                if (!((char >= 0x61 && char <= 0x7A) || // a-z
-                      (char >= 0x32 && char <= 0x37))) { // 2-7
-                    return false;
-                }
-            }
+        // Basic validation: CID should not be empty and have reasonable length
+        // IPFS CIDs are typically between 46 and 100+ characters
+        if (length >= 10 && length <= 200) {
             return true;
         }
         

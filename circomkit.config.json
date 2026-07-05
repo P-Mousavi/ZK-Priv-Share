@@ -1,0 +1,35 @@
+{
+  "circuits": [
+    {
+      "name": "identity",
+      "path": "./circuits/identity.circom",
+      "prime": "bn128"
+    },
+    {
+      "name": "claim",
+      "path": "./circuits/claim.circom",
+      "prime": "bn128"
+    },
+    {
+      "name": "merkleTree",
+      "path": "./circuits/lib/merkleTree.circom",
+      "prime": "bn128"
+    }
+  ],
+  "protocol": "groth16",
+  "ptau": "./ptau",
+  "circuitsDir": "./circuits",
+  "buildDir": "./build",
+  "provingKeysDir": "./build/keys",
+  "verificationKeysDir": "./build/keys",
+  "witnessDir": "./build/witness",
+  "r1csDir": "./build/r1cs",
+  "wasmDir": "./build/wasm",
+  "solidityTemplates": "templates",
+  "solidityDir": "./contracts",
+  "testDir": "./test/circuits",
+  "logs": true,
+  "verbose": true,
+  "optimizer": true,
+  "inspect": false
+}

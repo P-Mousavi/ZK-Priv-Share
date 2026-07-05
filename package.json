@@ -4,7 +4,12 @@
   "description": "",
   "main": "index.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "npm run test:contracts",
+    "test:contracts": "./node_modules/.bin/hardhat test test/contracts/*.test.js",
+    "test:circuits": "./node_modules/.bin/mocha test/circuits/*.test.ts --timeout 300000",
+    "test:all": "npm run test:contracts && npm run test:circuits",
+    "compile": "./node_modules/.bin/hardhat compile",
+    "build": "npm run compile"
   },
   "keywords": [],
   "author": "",
@@ -18,5 +23,18 @@
     "ethers": "^6.15.0",
     "snarkjs": "^0.7.5",
     "solc": "^0.8.30"
+  },
+  "devDependencies": {
+    "@nomicfoundation/hardhat-toolbox": "^4.0.0",
+    "@types/chai": "^4.3.0",
+    "@types/mocha": "^10.0.0",
+    "@types/node": "^20.0.0",
+    "chai": "^4.3.0",
+    "circomkit": "^0.3.4",
+    "hardhat": "^2.22.0",
+    "mocha": "^10.0.0",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.0.0"
   }
 }
+

@@ -424,6 +424,70 @@ The contract flow enforces:
 
 ---
 
+## Testing
+
+The project includes comprehensive unit tests for both Circom circuits and Solidity contracts.
+
+### Test Structure
+
+- **Circuit Tests** (`test/circuits/`): Tests for Circom circuits using circom_tester
+  - `identity.test.ts` - Tests for identity circuit
+  - `claim.test.ts` - Tests for claim/reward circuit
+  - `merkleTree.test.ts` - Tests for Merkle tree circuit
+
+- **Contract Tests** (`test/contracts/`): Tests for Solidity contracts using Hardhat
+  - `Identity.test.js` - Tests for Identity contract
+  - `ZKIdentity.test.js` - Tests for ZKIdentity contract
+  - `ZKData.test.js` - Tests for ZKDataContract (full workflow)
+
+### Running Tests
+
+Run all tests:
+```bash
+npm test
+```
+
+Run only contract tests:
+```bash
+npm run test:contracts
+```
+
+Run only circuit tests:
+```bash
+npm run test:circuits
+```
+
+### Test Coverage
+
+**Circuit Tests:**
+- Valid proof generation and verification
+- Invalid Merkle root detection
+- Invalid path elements detection
+- Unique nullifier generation for different actions
+- Maximum tree depth handling
+- Edge cases (zero values, maximum field elements)
+
+**Contract Tests:**
+- Identity registration with deposits
+- CTI sharing with delegates
+- Access request/response workflow
+- Dispute raising and resolution
+- Group manager voting
+- ZK identity registration
+- ZK access requests
+- Reward claiming
+- Fee distribution
+- Access control and validation
+
+### Test Utilities
+
+Helper functions are provided in `test/helpers/`:
+- `merkle.ts` - Merkle tree construction and proof generation
+- `poseidon.ts` - Poseidon hash functions
+- `proofs.ts` - ZK proof generation and verification
+
+---
+
 ## Suggested Next Improvements
 
 - Add a proper framework (`hardhat` or `foundry`) with reproducible deploy scripts.
