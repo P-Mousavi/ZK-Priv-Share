@@ -19,6 +19,16 @@ interface IIdentityContract {
     function rewardDefendant(address _defendant, address _complainant) external;
 }
 
+// Interface for the Claim circuit verifier
+interface IClaimVerifier {
+    function verifyProof(
+        uint[2] calldata _pA,
+        uint[2][2] calldata _pB,
+        uint[2] calldata _pC,
+        uint[4] memory _pubSignals
+    ) external view returns (bool);
+}
+
 /**
  * @title ZKDataContract
  * @dev Manages the CTI sharing (Share Phase) and access (Request-Response Phase) with both ZK and non-ZK support.
@@ -27,6 +37,7 @@ interface IIdentityContract {
 contract ZKDataContract {
     IZKIdentity public zkIdentity;
     IIdentityContract public identityContract;
+    IClaimVerifier public claimVerifier;
 
     // --- Roles & Registration ---
     mapping(address => bool) public isGroupManager;
@@ -108,6 +119,18 @@ contract ZKDataContract {
     // Group managers must register their commitment in the ZK identity tree
     mapping(uint256 => bool) public zkGroupManagerCommitments;
 
+    // --- Reward Tree (Decoupled Shielded Payouts) ---
+    // Maps payoutCommitment -> reward amount for pending rewards
+    mapping(uint256 => uint256) public rewardTreeBalances;
+    // Maps payoutNullifier -> bool to prevent double-claiming
+    mapping(uint256 => bool) public spentPayoutNullifiers;
+    // Track valid reward tree roots
+    mapping(uint256 => bool) public rewardTreeRoots;
+    // Next leaf index for reward tree
+    uint256 public rewardTreeNextLeafIndex;
+    // Current reward tree root
+    uint256 public currentRewardTreeRoot;
+
     // --- Modifiers ---
     modifier onlyRegistered() {
         require(identityContract.isRegistered(msg.sender), "Organisation not registered");
@@ -132,15 +155,19 @@ contract ZKDataContract {
     event ZKVotedOnDispute(uint256 indexed disputeId, bytes32 nullifierHash, bool isGuilty);
     event DisputeSettled(uint256 indexed disputeId, bool wasGuilty);
     event ZKGroupManagerRegistered(uint256 indexed commitment);
+    event RewardMinted(uint256 indexed payoutCommitment, uint256 amount);
+    event RewardClaimed(uint256 indexed nullifierHash, address indexed recipient, uint256 amount);
 
     constructor(
         address _zkIdentity,
         address _identityContract,
+        address _claimVerifier,
         address[] memory _initialManagers,
         uint256 _threshold
     ) {
         zkIdentity = IZKIdentity(_zkIdentity);
         identityContract = IIdentityContract(_identityContract);
+        claimVerifier = IClaimVerifier(_claimVerifier);
         require(_threshold > 0 && _threshold <= _initialManagers.length, "Invalid threshold");
         
         groupManagerThreshold = _threshold;
@@ -268,10 +295,12 @@ contract ZKDataContract {
      * MUST prove they own the identity at 'allocatedLeafIndex'.
      * @param input = [root, actionId, nullifierHash]
      * actionId must be the requestId to bind the proof to this task.
+     * @param _payoutCommitment Poseidon hash of the delegate's payoutSecret for reward claiming
      */
     function provideResponseZK(
         uint256 _requestId,
         string calldata _ipfsCid,
+        uint256 _payoutCommitment,
         uint256[2] calldata a,
         uint256[2][2] calldata b,
         uint256[2] calldata c,
@@ -301,10 +330,15 @@ contract ZKDataContract {
         req.responseIpfsCid = _ipfsCid;
         req.fulfilled = true;
         
-        // 5. Payout
-        // Transfer rewards to msg.sender (which is a fresh address/relayer, separate from Identity)
-        // This breaks the link between Identity (Deposit) and Payout (Wallet).
-        payable(msg.sender).transfer(address(this).balance); // Simplified fee logic
+        // 5. Mint Reward to Reward Tree (Decoupled Payout)
+        // Instead of direct transfer, mint the reward to the reward tree
+        // The delegate can later claim it anonymously using claimReward()
+        uint256 rewardAmount = address(this).balance; // Simplified: use entire balance as reward
+        require(rewardAmount > 0, "No reward available");
+        require(rewardTreeBalances[_payoutCommitment] == 0, "Payout commitment already used");
+        
+        rewardTreeBalances[_payoutCommitment] = rewardAmount;
+        emit RewardMinted(_payoutCommitment, rewardAmount);
 
         emit ZKResponseProvided(_requestId);
     }
@@ -659,5 +693,81 @@ contract ZKDataContract {
             emit DisputeSettled(_disputeId, false);
         }
         // If no threshold is met, the dispute remains open for more votes.
+    }
+
+    // --- DECOUPLED SHIELDED PAYOUTS ---
+
+    /**
+     * @dev Verify the claim proof using the claim verifier contract.
+     * @param _pA First proof parameter
+     * @param _pB Second proof parameter
+     * @param _pC Third proof parameter
+     * @param _pubSignals Public signals: [root, nullifierHash, recipient, relayerFee]
+     */
+    function verifyClaimProof(
+        uint[2] calldata _pA,
+        uint[2][2] calldata _pB,
+        uint[2] calldata _pC,
+        uint[4] memory _pubSignals
+    ) public view returns (bool) {
+        return claimVerifier.verifyProof(_pA, _pB, _pC, _pubSignals);
+    }
+
+    /**
+     * @dev Claim a reward anonymously using a ZK proof.
+     * The delegate proves knowledge of a payoutSecret that exists in the reward tree.
+     * The reward is sent to a fresh recipient address, breaking the link to the original submission.
+     * @param _pA First proof parameter
+     * @param _pB Second proof parameter
+     * @param _pC Third proof parameter
+     * @param _root Merkle root of the reward tree at the time of minting
+     * @param _nullifierHash Hash of the payoutSecret to prevent double-claiming
+     * @param _recipient Fresh address to receive the reward
+     * @param _relayerFee Fee to pay the relayer for gas costs
+     * @param _payoutCommitment The commitment to look up the reward balance
+     */
+    function claimReward(
+        uint[2] calldata _pA,
+        uint[2][2] calldata _pB,
+        uint[2] calldata _pC,
+        uint256 _root,
+        uint256 _nullifierHash,
+        address _recipient,
+        uint256 _relayerFee,
+        uint256 _payoutCommitment
+    ) external {
+        // 1. Check that the nullifier hasn't been spent (prevent double-claiming)
+        require(!spentPayoutNullifiers[_nullifierHash], "Reward already claimed");
+
+        // 2. Verify the claim proof
+        // Public signals: [root, nullifierHash, recipient, relayerFee]
+        uint[4] memory pubSignals = [_root, _nullifierHash, uint256(uint160(_recipient)), _relayerFee];
+        require(verifyClaimProof(_pA, _pB, _pC, pubSignals), "Invalid claim proof");
+
+        // 3. Mark the nullifier as spent
+        spentPayoutNullifiers[_nullifierHash] = true;
+
+        // 4. Calculate the payout amount
+        // Retrieve the reward amount from the commitment mapping
+        uint256 totalReward = rewardTreeBalances[_payoutCommitment];
+        require(totalReward > 0, "No reward available for this commitment");
+        require(totalReward >= _relayerFee, "Relayer fee exceeds reward amount");
+
+        uint256 payoutAmount = totalReward - _relayerFee;
+
+        // 5. Pay the relayer for gas
+        if (_relayerFee > 0) {
+            (bool sentRelayer, ) = payable(msg.sender).call{value: _relayerFee}("");
+            require(sentRelayer, "Relayer fee transfer failed");
+        }
+
+        // 6. Pay the anonymous delegate to the fresh recipient address
+        (bool sentRecipient, ) = _recipient.call{value: payoutAmount}("");
+        require(sentRecipient, "Reward transfer failed");
+
+        // 7. Clean up the reward balance
+        rewardTreeBalances[_payoutCommitment] = 0;
+
+        emit RewardClaimed(_nullifierHash, _recipient, payoutAmount);
     }
 }

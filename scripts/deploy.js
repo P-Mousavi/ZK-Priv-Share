@@ -285,6 +285,7 @@ async function main() {
         
         if (contractName === "ZKDataContract") {
             const zkIdentityAddress = loadDeployedAddress("ZKIdentity");
+            const claimVerifierAddress = loadDeployedAddress("ClaimVerifier");
             const { identityContract, threshold } = loadDeploymentConfig();
             const initialManagers = loadInitialManagers();
 
@@ -297,11 +298,13 @@ async function main() {
             constructorArgs = [
                 zkIdentityAddress,
                 identityContract,
+                claimVerifierAddress,
                 initialManagers,
                 threshold,
             ];
 
             console.log(`🔗 Using ZKIdentity address: ${zkIdentityAddress}`);
+            console.log(`🔗 Using ClaimVerifier address: ${claimVerifierAddress}`);
             console.log(`🔗 Using Identity contract address: ${identityContract}`);
             console.log(`👥 Initial managers (${initialManagers.length}):`, initialManagers.join(", "));
             console.log(`🗳️  Voting threshold: ${threshold}`);

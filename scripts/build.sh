@@ -86,10 +86,16 @@ echo ">>> Verifying proof..."
 npx snarkjs groth16 verify build/verification_key.json build/public.json build/proof.json
 
 echo ">>> Generating the verifier solidity program"
-npx snarkjs zkey export solidityverifier build/${CIRCUIT}_final.zkey ../contracts/Verifier.sol
+# Output to appropriate verifier file based on circuit name
+if [ "$CIRCUIT" = "claim" ]; then
+    VERIFIER_FILE="../contracts/ClaimVerifier.sol"
+else
+    VERIFIER_FILE="../contracts/Verifier.sol"
+fi
+npx snarkjs zkey export solidityverifier build/${CIRCUIT}_final.zkey $VERIFIER_FILE
 
 echo ">>> Post-processing Verifier.sol to add 'virtual' keyword"
 # Add 'virtual' to verifyProof function to allow overriding
-sed -i '/function verifyProof.*public view returns (bool)/s/public view returns/public view virtual returns/' ../contracts/Verifier.sol
+sed -i '/function verifyProof.*public view returns (bool)/s/public view returns/public view virtual returns/' $VERIFIER_FILE
 
 echo ">>> DONE. Proof + public inputs generated."
