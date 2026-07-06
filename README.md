@@ -60,7 +60,7 @@ At this point, the blockchain knows a reward was minted for a valid CTI response
 
 Days or weeks later, when the anonymity set of the Reward Merkle Tree has grown sufficiently large, the delegate withdraws the funds to a completely fresh, unlinked address:
 
-1. The delegate constructs a ZK proof using the `claim.circom` circuit
+1. The delegate constructs a ZK proof using the `reward.circom` circuit
 2. The circuit takes `payoutSecret` and the Merkle membership proof for the Reward Tree as private inputs
 3. The circuit outputs a deterministic `payoutNullifier = Poseidon(payoutSecret)` to prevent double-claiming
 4. The circuit accepts public variables: `root`, `recipient`, `relayerFee`
@@ -70,9 +70,9 @@ Days or weeks later, when the anonymity set of the Reward Merkle Tree has grown 
 
 ### Key Components
 
-**claim.circom Circuit**
+**reward.circom Circuit**
 
-Located in `circuits/claim.circom`, this circuit verifies:
+Located in `circuits/reward.circom`, this circuit verifies:
 - Knowledge of a `payoutSecret` that exists in the reward tree
 - Merkle proof of inclusion for the commitment
 - Outputs a `nullifierHash` to prevent double-claiming
@@ -82,7 +82,7 @@ Located in `circuits/claim.circom`, this circuit verifies:
 
 - `provideResponseZK()`: Modified to accept `payoutCommitment` and mint rewards to the reward tree instead of direct transfer
 - `claimReward()`: New function that allows anonymous reward withdrawal using ZK proof verification
-- `verifyClaimProof()`: Helper function to verify claim proofs using the ClaimVerifier contract
+- `verifyRewardProof()`: Helper function to verify reward proofs using the RewardVerifier contract
 
 **State Variables**
 
@@ -102,15 +102,15 @@ Located in `circuits/claim.circom`, this circuit verifies:
 
 To deploy the updated system:
 
-1. Deploy `ClaimVerifier.sol` (mock version for testing, replace with real verifier after circuit compilation)
-2. Deploy `ZKData.sol` with the new constructor parameter `_claimVerifier`
+1. Deploy `RewardVerifier.sol` (mock version for testing, replace with real verifier after circuit compilation)
+2. Deploy `ZKData.sol` with the new constructor parameter `_rewardVerifier`
 
 ```bash
 node scripts/deploy.js -c ClaimVerifier.sol
 node scripts/deploy.js -c ZKData.sol
 ```
 
-Note: The real `ClaimVerifier.sol` should be generated from the `claim.circom` circuit using the build script once the circuit compilation issues are resolved.
+Note: The real `RewardVerifier.sol` should be generated from the `reward.circom` circuit using the build script once the circuit compilation issues are resolved.
 
 ---
 
@@ -306,25 +306,25 @@ This writes:
 
 - `deployments/localhost/ZKIdentity.json`
 
-### 6.3 Deploy `ClaimVerifier.sol`
+### 6.3 Deploy `RewardVerifier.sol`
 
-Deploy the claim verifier contract (currently a mock for testing):
+Deploy the reward verifier contract (currently a mock for testing):
 
 ```bash
-node scripts/deploy.js -c ClaimVerifier.sol
+node scripts/deploy.js -c RewardVerifier.sol
 ```
 
 This writes:
-- `deployments/localhost/ClaimVerifier.json`
+- `deployments/localhost/RewardVerifier.json`
 
-Note: The real ClaimVerifier should be generated from `claim.circom` using the build script. The current version is a mock that always returns true for testing purposes.
+Note: The real RewardVerifier should be generated from `reward.circom` using the build script. The current version is a mock that always returns true for testing purposes.
 
 ### 6.4 Deploy `ZKData.sol`
 
 Before deploying `ZKData.sol`, make sure:
 
 1. `ZKIdentity.sol` is already deployed.
-2. `ClaimVerifier.sol` is already deployed.
+2. `RewardVerifier.sol` is already deployed.
 3. `config/config.json` contains a valid `identityContract` address and `threshold`.
 4. `config/InitialManagers.json` contains the manager account list.
 
@@ -338,7 +338,7 @@ Constructor arguments are loaded automatically as:
 
 1. `_zkIdentity` from `deployments/localhost/ZKIdentity.json`
 2. `_identityContract` from `config/config.json`
-3. `_claimVerifier` from `deployments/localhost/ClaimVerifier.json`
+3. `_rewardVerifier` from `deployments/localhost/RewardVerifier.json`
 4. `_initialManagers` from `config/InitialManagers.json`
 5. `_threshold` from `config/config.json`
 
@@ -380,7 +380,7 @@ The contract flow enforces:
 6. `bash scripts/build.sh -c identity -i input.json`
 7. Start local chain on `127.0.0.1:8545`
 8. `node scripts/deploy.js -c ZKIdentity.sol`
-9. `node scripts/deploy.js -c ClaimVerifier.sol`
+9. `node scripts/deploy.js -c RewardVerifier.sol`
 10. `node scripts/deploy.js -c ZKData.sol`
 11. Use generated `proof.json` + `public.json` in contract interaction scripts/tests
 
@@ -432,7 +432,7 @@ The project includes comprehensive unit tests for both Circom circuits and Solid
 
 - **Circuit Tests** (`test/circuits/`): Tests for Circom circuits using circom_tester
   - `identity.test.ts` - Tests for identity circuit
-  - `claim.test.ts` - Tests for claim/reward circuit
+  - `reward.test.ts` - Tests for reward circuit
   - `merkleTree.test.ts` - Tests for Merkle tree circuit
 
 - **Contract Tests** (`test/contracts/`): Tests for Solidity contracts using Hardhat

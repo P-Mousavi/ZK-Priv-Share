@@ -1,0 +1,5 @@
+require: ts-node/register
+extension: ts
+timeout: 300000
+spec: test/circuits/**/*.test.ts
+

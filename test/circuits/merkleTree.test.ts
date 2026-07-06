@@ -1,8 +1,8 @@
-import { expect } from "chai";
-import { wasm } from "circom_tester";
-import path from "path";
-import { poseidonHash2, randomFieldElement } from "../helpers/poseidon";
-import { createMerkleTree } from "../helpers/merkle";
+const { expect } = require("chai");
+const { wasm } = require("circom_tester");
+const path = require("path");
+const { poseidonHash2, randomFieldElement } = require("../helpers/poseidon");
+const { createMerkleTree } = require("../helpers/merkle");
 
 describe("Merkle Tree Circuit", () => {
   let circuit: any;

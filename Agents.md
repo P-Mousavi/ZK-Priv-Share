@@ -25,3 +25,7 @@ This project implements a proof-of-concept of the Priv-share protocol, enhanced 
   ```bash
   node scripts/deploy.js -c ZKIdentity.sol && node scripts/deploy.js -c ZKData.sol
   ```
+- **Testing**: Ensure the circuit tests pass after each modification to the main contracts (ZKData.sol and ZKIdentity.sol):
+  ```bash
+  npm run test:circuits
+  ```

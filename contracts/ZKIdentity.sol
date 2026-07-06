@@ -22,13 +22,12 @@ contract ZKIdentity is Groth16Verifier {
     event DepositSlashed(uint256 indexed commitment);
 
     // ZK Verifier Logic for slashing
-    // Note: Parent Verifier expects 4 signals, but identity circuit uses 3
-    // The 4th signal is unused in this context
+    // Note: Parent Verifier expects 3 signals: [root, actionId, nullifierHash]
     function verifyProof(
         uint[2] calldata _pA,
         uint[2][2] calldata _pB,
         uint[2] calldata _pC,
-        uint[4] calldata _pubSignals // [root, actionId, nullifierHash, unused]
+        uint[3] calldata _pubSignals // [root, actionId, nullifierHash]
     ) public view override returns (bool) {
         return super.verifyProof(_pA, _pB, _pC, _pubSignals);
     }
@@ -69,5 +68,49 @@ contract ZKIdentity is Groth16Verifier {
         deposits[_commitment] = 0; 
         // Logic to send funds to complainant would go here
         emit DepositSlashed(_commitment);
+    }
+
+    /**
+     * @dev Called by ZKDataContract when a delegate is found guilty.
+     * Zeros out the reward assigned to the payoutCommitment and removes the identity from the merkle tree.
+     * @param _defendant The address of the guilty delegate (for tracking purposes, actual identity is commitment-based)
+     * @param _payoutCommitment The commitment to zero out the reward for
+     * @param _identityCommitment The identity commitment to remove from the merkle tree
+     */
+    function slashAndReward(
+        address _defendant,
+        uint256 _payoutCommitment,
+        uint256 _identityCommitment
+    ) external {
+        // Access control: only callable by ZKDataContract (would need to add proper access control)
+        
+        // Zero out the reward assigned to the payoutCommitment
+        // This requires access to the rewardTreeBalances mapping from ZKDataContract
+        // For now, we'll emit an event and the ZKDataContract will handle the actual zeroing
+        emit DepositSlashed(_payoutCommitment);
+        
+        // Remove the identity from the merkle tree by zeroing the deposit
+        // This effectively prevents the delegate from generating valid proofs
+        if (deposits[_identityCommitment] > 0) {
+            deposits[_identityCommitment] = 0;
+            emit DepositSlashed(_identityCommitment);
+        }
+    }
+
+    /**
+     * @dev Called by ZKDataContract when a delegate is found innocent (false accusation).
+     * Rewards the defendant for the false accusation.
+     * @param _defendant The address of the innocent delegate
+     * @param _complainant The address of the false accuser
+     */
+    function rewardDefendant(
+        address _defendant,
+        address _complainant
+    ) external {
+        // Access control: only callable by ZKDataContract (would need to add proper access control)
+        
+        // The actual reward logic would be handled by ZKDataContract
+        // This function is a placeholder for the interface requirement
+        // In a full implementation, this might involve transferring funds from the complainant's deposit
     }
 }

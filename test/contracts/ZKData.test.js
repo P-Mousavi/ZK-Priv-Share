@@ -2,7 +2,7 @@ const { expect } = require("chai");
 const { ethers } = require("hardhat");
 
 describe("ZKDataContract", function () {
-  let zkData, identityContract, zkIdentity, claimVerifier;
+  let zkData, identityContract, zkIdentity, rewardVerifier;
   let owner, producer, consumer, delegate1, delegate2, manager1, manager2, manager3;
 
   const REGISTRATION_DEPOSIT = ethers.parseEther("1");
@@ -23,17 +23,17 @@ describe("ZKDataContract", function () {
     zkIdentity = await ZKIdentityFactory.deploy();
     await zkIdentity.waitForDeployment();
 
-    // Deploy ClaimVerifier
-    const ClaimVerifierFactory = await ethers.getContractFactory("contracts/ClaimVerifier.sol:Groth16Verifier");
-    claimVerifier = await ClaimVerifierFactory.deploy();
-    await claimVerifier.waitForDeployment();
+    // Deploy RewardVerifier
+    const RewardVerifierFactory = await ethers.getContractFactory("contracts/RewardVerifier.sol:Groth16Verifier");
+    rewardVerifier = await RewardVerifierFactory.deploy();
+    await rewardVerifier.waitForDeployment();
 
     // Deploy ZKDataContract
     const ZKDataFactory = await ethers.getContractFactory("ZKDataContract");
     zkData = await ZKDataFactory.deploy(
       await zkIdentity.getAddress(),
       await identityContract.getAddress(),
-      await claimVerifier.getAddress(),
+      await rewardVerifier.getAddress(),
       [manager1.address, manager2.address, manager3.address],
       THRESHOLD
     );
@@ -54,7 +54,7 @@ describe("ZKDataContract", function () {
     it("should set correct addresses", async () => {
       expect(await zkData.zkIdentity()).to.equal(await zkIdentity.getAddress());
       expect(await zkData.identityContract()).to.equal(await identityContract.getAddress());
-      expect(await zkData.claimVerifier()).to.equal(await claimVerifier.getAddress());
+      expect(await zkData.rewardVerifier()).to.equal(await rewardVerifier.getAddress());
     });
 
     it("should set correct group manager threshold", async () => {
@@ -600,8 +600,8 @@ describe("ZKDataContract", function () {
       expect(typeof zkData.claimReward).to.equal("function");
     });
 
-    it("should have verifyClaimProof function available", async () => {
-      expect(typeof zkData.verifyClaimProof).to.equal("function");
+    it("should have verifyRewardProof function available", async () => {
+      expect(typeof zkData.verifyRewardProof).to.equal("function");
     });
   });
 

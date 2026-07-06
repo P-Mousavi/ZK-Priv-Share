@@ -1,9 +1,9 @@
-import { buildPoseidon } from "circomlibjs";
+const { buildPoseidon } = require("circomlibjs");
 
 /**
  * Merkle Tree utilities for testing
  */
-export class MerkleTree {
+class MerkleTree {
   private levels: number;
   private leaves: bigint[];
   private poseidon: any;
@@ -113,7 +113,7 @@ export class MerkleTree {
 /**
  * Create a simple Merkle tree with given leaves
  */
-export async function createMerkleTree(leaves: bigint[], levels: number = 5): Promise<{
+async function createMerkleTree(leaves: bigint[], levels: number = 5): Promise<{
   tree: MerkleTree;
   root: bigint;
   proofs: Array<{ pathElements: bigint[]; pathIndices: number[] }>;
@@ -130,3 +130,8 @@ export async function createMerkleTree(leaves: bigint[], levels: number = 5): Pr
   
   return { tree, root, proofs };
 }
+
+module.exports = {
+  MerkleTree,
+  createMerkleTree
+};

@@ -6,7 +6,7 @@
   "scripts": {
     "test": "npm run test:contracts",
     "test:contracts": "./node_modules/.bin/hardhat test test/contracts/*.test.js",
-    "test:circuits": "./node_modules/.bin/mocha test/circuits/*.test.ts --timeout 300000",
+    "test:circuits": "npx ts-mocha test/circuits/*.test.ts --timeout 300000",
     "test:all": "npm run test:contracts && npm run test:circuits",
     "compile": "./node_modules/.bin/hardhat compile",
     "build": "npm run compile"
@@ -26,15 +26,15 @@
   },
   "devDependencies": {
     "@nomicfoundation/hardhat-toolbox": "^4.0.0",
-    "@types/chai": "^4.3.0",
-    "@types/mocha": "^10.0.0",
+    "@types/chai": "^4.3.20",
+    "@types/mocha": "^10.0.10",
     "@types/node": "^20.0.0",
     "chai": "^4.3.0",
     "circomkit": "^0.3.4",
     "hardhat": "^2.22.0",
     "mocha": "^10.0.0",
+    "ts-mocha": "^11.1.0",
     "ts-node": "^10.9.2",
     "typescript": "^5.0.0"
   }
 }
-

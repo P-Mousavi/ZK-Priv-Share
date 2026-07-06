@@ -10,6 +10,16 @@ interface IZKIdentity {
     ) external view returns (bool);
     function roots(uint256 root) external view returns(bool);
     function nextLeafIndex() external view returns(uint256);
+    function deposits(uint256 commitment) external view returns(uint256);
+    function slashAndReward(
+        address _defendant,
+        uint256 _payoutCommitment,
+        uint256 _identityCommitment
+    ) external;
+    function rewardDefendant(
+        address _defendant,
+        address _complainant
+    ) external;
 }
 
 // Interface for the IdentityContract (non-ZK)
@@ -19,8 +29,8 @@ interface IIdentityContract {
     function rewardDefendant(address _defendant, address _complainant) external;
 }
 
-// Interface for the Claim circuit verifier
-interface IClaimVerifier {
+// Interface for the Reward circuit verifier
+interface IRewardVerifier {
     function verifyProof(
         uint[2] calldata _pA,
         uint[2][2] calldata _pB,
@@ -37,7 +47,7 @@ interface IClaimVerifier {
 contract ZKDataContract {
     IZKIdentity public zkIdentity;
     IIdentityContract public identityContract;
-    IClaimVerifier public claimVerifier;
+    IRewardVerifier public rewardVerifier;
 
     // --- Roles & Registration ---
     mapping(address => bool) public isGroupManager;
@@ -106,6 +116,11 @@ contract ZKDataContract {
         mapping(address => bool) hasVoted;
         uint256 votesForGuilty;
         uint256 totalVotes;
+        // ZK-specific fields
+        uint256 payoutCommitment;   // For ZK disputes: the delegate's payout commitment
+        uint256 identityCommitment; // For ZK disputes: the delegate's identity commitment
+        uint256 accuserPayoutCommitment; // For ZK disputes: the accuser's payout commitment (to receive deposit if guilty)
+        bool isZKDispute;           // Flag to indicate if this is a ZK dispute
     }
     mapping(uint256 => Dispute) public disputes;
     uint256 public disputeCounter;
@@ -161,13 +176,13 @@ contract ZKDataContract {
     constructor(
         address _zkIdentity,
         address _identityContract,
-        address _claimVerifier,
+        address _rewardVerifier,
         address[] memory _initialManagers,
         uint256 _threshold
     ) {
         zkIdentity = IZKIdentity(_zkIdentity);
         identityContract = IIdentityContract(_identityContract);
-        claimVerifier = IClaimVerifier(_claimVerifier);
+        rewardVerifier = IRewardVerifier(_rewardVerifier);
         require(_threshold > 0 && _threshold <= _initialManagers.length, "Invalid threshold");
         
         groupManagerThreshold = _threshold;
@@ -507,12 +522,34 @@ contract ZKDataContract {
         if (d.votesForGuilty >= groupManagerThreshold) {
             // Outcome A: Guilty. Slash defendant, reward complainant.
             d.isOpen = false;
-            identityContract.slashAndReward(d.defendant, d.complainant);
+            if (d.isZKDispute) {
+                // ZK dispute: transfer delegate's deposit to accuser's payout commitment
+                uint256 delegateDeposit = zkIdentity.deposits(d.identityCommitment);
+                if (delegateDeposit > 0) {
+                    // Add delegate's deposit to accuser's payout commitment in reward tree
+                    rewardTreeBalances[d.accuserPayoutCommitment] += delegateDeposit;
+                }
+                // Zero out the delegate's reward in the reward tree
+                if (rewardTreeBalances[d.payoutCommitment] > 0) {
+                    rewardTreeBalances[d.payoutCommitment] = 0;
+                }
+                // Remove delegate from identity tree by zeroing deposit
+                zkIdentity.slashAndReward(d.defendant, d.payoutCommitment, d.identityCommitment);
+            } else {
+                // Non-ZK dispute: use identity contract
+                identityContract.slashAndReward(d.defendant, d.complainant);
+            }
             emit DisputeSettled(_disputeId, true);
         } else if (notGuiltyVotes >= groupManagerThreshold) {
             // Outcome B: Innocent. Slash (false accuser) complainant, reward defendant.
             d.isOpen = false;
-            identityContract.rewardDefendant(d.defendant, d.complainant);
+            if (d.isZKDispute) {
+                // ZK dispute: use ZK-specific function
+                zkIdentity.rewardDefendant(d.defendant, d.complainant);
+            } else {
+                // Non-ZK dispute: use identity contract
+                identityContract.rewardDefendant(d.defendant, d.complainant);
+            }
             emit DisputeSettled(_disputeId, false);
         }
         // If no threshold is met, the dispute remains open for more votes.
@@ -538,6 +575,9 @@ contract ZKDataContract {
      * @param _defendant The address of the party being accused
      * @param _reason The reason for the dispute (enum value)
      * @param _evidenceCid IPFS CID of evidence supporting the dispute
+     * @param _payoutCommitment The delegate's payout commitment (to zero out reward if guilty)
+     * @param _identityCommitment The delegate's identity commitment (to remove from tree if guilty)
+     * @param _accuserPayoutCommitment The accuser's payout commitment (to receive delegate's deposit if guilty)
      * @param a, b, c ZK proof parameters
      * @param input Public signals: [root, actionId, nullifierHash]
      *              actionId = keccak256(abi.encodePacked(_requestId, uint256(_reason), "DISPUTE"))
@@ -547,6 +587,9 @@ contract ZKDataContract {
         address _defendant,
         DisputeReason _reason,
         string calldata _evidenceCid,
+        uint256 _payoutCommitment,
+        uint256 _identityCommitment,
+        uint256 _accuserPayoutCommitment,
         uint256[2] calldata a,
         uint256[2][2] calldata b,
         uint256[2] calldata c,
@@ -592,6 +635,10 @@ contract ZKDataContract {
         d.reason = _reason;
         d.evidence = IpfsCid(_evidenceCid);
         d.isOpen = true;
+        d.payoutCommitment = _payoutCommitment;
+        d.identityCommitment = _identityCommitment;
+        d.accuserPayoutCommitment = _accuserPayoutCommitment;
+        d.isZKDispute = true;
 
         emit ZKDisputeRaised(disputeCounter, nullifierHash);
     }
@@ -658,12 +705,34 @@ contract ZKDataContract {
         if (d.votesForGuilty >= groupManagerThreshold) {
             // Outcome A: Guilty. Slash defendant, reward complainant.
             d.isOpen = false;
-            identityContract.slashAndReward(d.defendant, d.complainant);
+            if (d.isZKDispute) {
+                // ZK dispute: transfer delegate's deposit to accuser's payout commitment
+                uint256 delegateDeposit = zkIdentity.deposits(d.identityCommitment);
+                if (delegateDeposit > 0) {
+                    // Add delegate's deposit to accuser's payout commitment in reward tree
+                    rewardTreeBalances[d.accuserPayoutCommitment] += delegateDeposit;
+                }
+                // Zero out the delegate's reward in the reward tree
+                if (rewardTreeBalances[d.payoutCommitment] > 0) {
+                    rewardTreeBalances[d.payoutCommitment] = 0;
+                }
+                // Remove delegate from identity tree by zeroing deposit
+                zkIdentity.slashAndReward(d.defendant, d.payoutCommitment, d.identityCommitment);
+            } else {
+                // Non-ZK dispute: use identity contract
+                identityContract.slashAndReward(d.defendant, d.complainant);
+            }
             emit DisputeSettled(_disputeId, true);
         } else if (notGuiltyVotes >= groupManagerThreshold) {
             // Outcome B: Innocent. Slash (false accuser) complainant, reward defendant.
             d.isOpen = false;
-            identityContract.rewardDefendant(d.defendant, d.complainant);
+            if (d.isZKDispute) {
+                // ZK dispute: use ZK-specific function
+                zkIdentity.rewardDefendant(d.defendant, d.complainant);
+            } else {
+                // Non-ZK dispute: use identity contract
+                identityContract.rewardDefendant(d.defendant, d.complainant);
+            }
             emit DisputeSettled(_disputeId, false);
         }
         // If no threshold is met, the dispute remains open for more votes.
@@ -672,19 +741,19 @@ contract ZKDataContract {
     // --- DECOUPLED SHIELDED PAYOUTS ---
 
     /**
-     * @dev Verify the claim proof using the claim verifier contract.
+     * @dev Verify the reward proof using the reward verifier contract.
      * @param _pA First proof parameter
      * @param _pB Second proof parameter
      * @param _pC Third proof parameter
      * @param _pubSignals Public signals: [root, nullifierHash, recipient, relayerFee]
      */
-    function verifyClaimProof(
+    function verifyRewardProof(
         uint[2] calldata _pA,
         uint[2][2] calldata _pB,
         uint[2] calldata _pC,
         uint[4] memory _pubSignals
     ) public view returns (bool) {
-        return claimVerifier.verifyProof(_pA, _pB, _pC, _pubSignals);
+        return rewardVerifier.verifyProof(_pA, _pB, _pC, _pubSignals);
     }
 
     /**
@@ -713,10 +782,10 @@ contract ZKDataContract {
         // 1. Check that the nullifier hasn't been spent (prevent double-claiming)
         require(!spentPayoutNullifiers[_nullifierHash], "Reward already claimed");
 
-        // 2. Verify the claim proof
+        // 2. Verify the reward proof
         // Public signals: [root, nullifierHash, recipient, relayerFee]
         uint[4] memory pubSignals = [_root, _nullifierHash, uint256(uint160(_recipient)), _relayerFee];
-        require(verifyClaimProof(_pA, _pB, _pC, pubSignals), "Invalid claim proof");
+        require(verifyRewardProof(_pA, _pB, _pC, pubSignals), "Invalid reward proof");
 
         // 3. Mark the nullifier as spent
         spentPayoutNullifiers[_nullifierHash] = true;

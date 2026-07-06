@@ -1,16 +1,16 @@
-import { expect } from "chai";
-import { buildPoseidon } from "circomlibjs";
-import { wasm } from "circom_tester";
-import path from "path";
-import { poseidonHash, randomFieldElement } from "../helpers/poseidon";
-import { createMerkleTree } from "../helpers/merkle";
+const { expect } = require("chai");
+const { buildPoseidon } = require("circomlibjs");
+const { wasm } = require("circom_tester");
+const path = require("path");
+const { poseidonHash, randomFieldElement } = require("../helpers/poseidon");
+const { createMerkleTree } = require("../helpers/merkle");
 
-describe("Claim Circuit", () => {
+describe("Reward Circuit", () => {
   let circuit: any;
   const LEVELS = 5;
 
   before(async () => {
-    const circuitPath = path.join(__dirname, "../../circuits/claim.circom");
+    const circuitPath = path.join(__dirname, "../../circuits/reward.circom");
     circuit = await wasm(circuitPath);
   });
 

@@ -6,8 +6,8 @@
       "prime": "bn128"
     },
     {
-      "name": "claim",
-      "path": "./circuits/claim.circom",
+      "name": "reward",
+      "path": "./circuits/reward.circom",
       "prime": "bn128"
     },
     {

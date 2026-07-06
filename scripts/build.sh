@@ -87,8 +87,8 @@ npx snarkjs groth16 verify build/verification_key.json build/public.json build/p
 
 echo ">>> Generating the verifier solidity program"
 # Output to appropriate verifier file based on circuit name
-if [ "$CIRCUIT" = "claim" ]; then
-    VERIFIER_FILE="../contracts/ClaimVerifier.sol"
+if [ "$CIRCUIT" = "reward" ]; then
+    VERIFIER_FILE="../contracts/RewardVerifier.sol"
 else
     VERIFIER_FILE="../contracts/Verifier.sol"
 fi
