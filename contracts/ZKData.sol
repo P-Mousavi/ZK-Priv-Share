@@ -48,6 +48,9 @@ contract ZKDataContract {
     IZKIdentity public zkIdentity;
     IIdentityContract public identityContract;
     IRewardVerifier public rewardVerifier;
+    
+    // Test helper flag
+    bool public testingMode;
 
     // --- Roles & Registration ---
     mapping(address => bool) public isGroupManager;
@@ -606,18 +609,18 @@ contract ZKDataContract {
         require(isValidIpfsCid(_evidenceCid), "Invalid IPFS CID format");
 
         // 1. Validate actionId binds proof to this specific dispute
-        bytes32 expectedActionId = keccak256(abi.encodePacked(_requestId, uint256(_reason), "DISPUTE"));
-        require(input[1] == uint256(expectedActionId), "Invalid Action ID");
+        require(input[1] == uint256(keccak256(abi.encodePacked(_requestId, uint256(_reason), "DISPUTE"))), "Invalid Action ID");
         
         // 2. Validate Merkle Root
         require(zkIdentity.roots(input[0]), "Invalid Merkle Root");
 
-        // 3. Verify ZK Proof
-        uint[2] memory _a = [uint(a[0]), uint(a[1])];
-        uint[2][2] memory _b = [[uint(b[0][0]), uint(b[0][1])], [uint(b[1][0]), uint(b[1][1])]];
-        uint[2] memory _c = [uint(c[0]), uint(c[1])];
-        uint[3] memory _input = [uint(input[0]), uint(input[1]), uint(input[2])];
-        require(zkIdentity.verifyProof(_a, _b, _c, _input), "Invalid ZK Proof");
+        // 3. Verify ZK Proof (inline conversion to reduce stack depth)
+        require(zkIdentity.verifyProof(
+            [uint(a[0]), uint(a[1])],
+            [[uint(b[0][0]), uint(b[0][1])], [uint(b[1][0]), uint(b[1][1])]],
+            [uint(c[0]), uint(c[1])],
+            [uint(input[0]), uint(input[1]), uint(input[2])]
+        ), "Invalid ZK Proof");
 
         // 4. Check nullifier to prevent replay
         bytes32 nullifierHash = bytes32(input[2]);
@@ -812,5 +815,24 @@ contract ZKDataContract {
         rewardTreeBalances[_payoutCommitment] = 0;
 
         emit RewardClaimed(_nullifierHash, _recipient, payoutAmount);
+    }
+
+    // --- Test Helper Functions ---
+    
+    /**
+     * @dev Test helper to enable testing mode
+     */
+    function setTestingMode(bool _enabled) external {
+        testingMode = _enabled;
+    }
+    
+    /**
+     * @dev Test helper to deposit rewards directly for benchmarking
+     * Only callable in testing mode
+     */
+    function depositReward(uint256 _payoutCommitment) external payable {
+        require(testingMode, "Not in testing mode");
+        require(msg.value > 0, "Must send ETH");
+        rewardTreeBalances[_payoutCommitment] = msg.value;
     }
 }

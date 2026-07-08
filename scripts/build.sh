@@ -94,8 +94,10 @@ else
 fi
 npx snarkjs zkey export solidityverifier build/${CIRCUIT}_final.zkey $VERIFIER_FILE
 
-echo ">>> Post-processing Verifier.sol to add 'virtual' keyword"
+echo ">>> Post-processing Verifier.sol to add 'virtual' keyword and fix pragma version"
 # Add 'virtual' to verifyProof function to allow overriding
 sed -i '/function verifyProof.*public view returns (bool)/s/public view returns/public view virtual returns/' $VERIFIER_FILE
+# Fix pragma version to match project (0.8.20)
+sed -i 's/pragma solidity >=0.7.0 <0.9.0;/pragma solidity ^0.8.20;/' $VERIFIER_FILE
 
 echo ">>> DONE. Proof + public inputs generated."

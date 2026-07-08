@@ -7,6 +7,8 @@ contract ZKIdentity is Groth16Verifier {
     uint256 public constant REGISTRATION_DEPOSIT = 1 ether;
     uint256 public constant MERKLE_TREE_LEVELS = 20;
 
+    constructor() payable {}
+
     // Mapping of Commitment -> Deposit Amount
     mapping(uint256 => uint256) public deposits;
     
