@@ -103,18 +103,13 @@ contract ZKDataContract {
         FALSE_CTI_SHARED
     }
 
-    // --- IPFS CID Struct ---
-    struct IpfsCid {
-        string cid; // The IPFS CID string
-    }
-
     // --- Disputes (Regulation Phase) ---
     struct Dispute {
         address complainant;
         address defendant;
         uint256 accessRequestId;
         DisputeReason reason;       // Dispute reason provided by complainant
-        IpfsCid evidence;           // Evidence IPFS CID
+        string evidenceCid;         // Evidence IPFS CID
         bool isOpen;
         mapping(address => bool) hasVoted;
         uint256 votesForGuilty;
@@ -160,6 +155,57 @@ contract ZKDataContract {
         _;
     }
 
+    // --- Internal Helper Functions ---
+    function _verifyZKProof(
+        uint256[2] calldata a,
+        uint256[2][2] calldata b,
+        uint256[2] calldata c,
+        uint256[3] calldata input
+    ) internal view returns (bool) {
+        uint[2] memory _a = [uint(a[0]), uint(a[1])];
+        uint[2][2] memory _b = [[uint(b[0][0]), uint(b[0][1])], [uint(b[1][0]), uint(b[1][1])]];
+        uint[2] memory _c = [uint(c[0]), uint(c[1])];
+        uint[3] memory _input = [uint(input[0]), uint(input[1]), uint(input[2])];
+        return zkIdentity.verifyProof(_a, _b, _c, _input);
+    }
+
+    function _settleDispute(Dispute storage d, uint256 _disputeId) internal {
+        uint256 notGuiltyVotes = d.totalVotes - d.votesForGuilty;
+        
+        if (d.votesForGuilty >= groupManagerThreshold) {
+            // Outcome A: Guilty. Slash defendant, reward complainant.
+            d.isOpen = false;
+            if (d.isZKDispute) {
+                // ZK dispute: transfer delegate's deposit to accuser's payout commitment
+                uint256 delegateDeposit = zkIdentity.deposits(d.identityCommitment);
+                if (delegateDeposit > 0) {
+                    rewardTreeBalances[d.accuserPayoutCommitment] += delegateDeposit;
+                }
+                // Zero out the delegate's reward in the reward tree
+                if (rewardTreeBalances[d.payoutCommitment] > 0) {
+                    rewardTreeBalances[d.payoutCommitment] = 0;
+                }
+                // Remove delegate from identity tree by zeroing deposit
+                zkIdentity.slashAndReward(d.defendant, d.payoutCommitment, d.identityCommitment);
+            } else {
+                // Non-ZK dispute: use identity contract
+                identityContract.slashAndReward(d.defendant, d.complainant);
+            }
+            emit DisputeSettled(_disputeId, true);
+        } else if (notGuiltyVotes >= groupManagerThreshold) {
+            // Outcome B: Innocent. Slash (false accuser) complainant, reward defendant.
+            d.isOpen = false;
+            if (d.isZKDispute) {
+                // ZK dispute: use ZK-specific function
+                zkIdentity.rewardDefendant(d.defendant, d.complainant);
+            } else {
+                // Non-ZK dispute: use identity contract
+                identityContract.rewardDefendant(d.defendant, d.complainant);
+            }
+            emit DisputeSettled(_disputeId, false);
+        }
+    }
+
     // --- Events ---
     event CtiShared(uint256 indexed ctiId, address indexed producer);
     event ZKRequestCreated(uint256 requestId, uint256 allocatedLeafIndex);
@@ -198,26 +244,6 @@ contract ZKDataContract {
         }
     }
 
-    // --- IPFS CID Validation ---
-    /**
-     * @dev Validates that a string is a legitimate IPFS CID.
-     * IPFS CID v0: starts with "Qm" and is 46 characters
-     * IPFS CID v1: starts with "b" and follows base32 encoding pattern
-     * @param _cid The CID string to validate
-     * @return isValid True if the CID appears to be valid
-     */
-    function isValidIpfsCid(string memory _cid) internal pure returns (bool) {
-        bytes memory cidBytes = bytes(_cid);
-        uint256 length = cidBytes.length;
-        
-        // Basic validation: CID should not be empty and have reasonable length
-        // IPFS CIDs are typically between 46 and 100+ characters
-        if (length >= 10 && length <= 200) {
-            return true;
-        }
-        
-        return false;
-    }
 
     // --- SHARE PHASE ---
 
@@ -309,14 +335,7 @@ contract ZKDataContract {
         require(zkIdentity.roots(input[0]), "Invalid Merkle Root");
 
         // 3. Verify ZK Proof via Identity Contract
-        // "I exist in the tree at Root, and I am performing Action RequestID"
-        // Convert uint256 calldata arrays to uint calldata arrays (they're the same type)
-        // We need to create memory copies since we can't directly convert calldata types
-        uint[2] memory _a = [uint(a[0]), uint(a[1])];
-        uint[2][2] memory _b = [[uint(b[0][0]), uint(b[0][1])], [uint(b[1][0]), uint(b[1][1])]];
-        uint[2] memory _c = [uint(c[0]), uint(c[1])];
-        uint[3] memory _input = [uint(input[0]), uint(input[1]), uint(input[2])];
-        require(zkIdentity.verifyProof(_a, _b, _c, _input), "Invalid ZK Proof");
+        require(_verifyZKProof(a, b, c, input), "Invalid ZK Proof");
 
         // 4. Update State
         req.responseIpfsCid = _ipfsCid;
@@ -451,7 +470,7 @@ contract ZKDataContract {
         
         require(req.status == RequestStatus.Responded || req.status == RequestStatus.CredentialsProvided, "Invalid status for dispute");
         require(_reason != DisputeReason.NONE, "Dispute reason cannot be NONE");
-        require(isValidIpfsCid(_evidenceCid), "Invalid IPFS CID format");
+        require(bytes(_evidenceCid).length >= 10 && bytes(_evidenceCid).length <= 200, "Invalid IPFS CID format");
         
         req.status = RequestStatus.Disputed;
 
@@ -461,7 +480,7 @@ contract ZKDataContract {
         d.defendant = _defendant;
         d.accessRequestId = _requestId;
         d.reason = _reason;
-        d.evidence = IpfsCid(_evidenceCid);
+        d.evidenceCid = _evidenceCid;
         d.isOpen = true;
 
         emit DisputeRaised(disputeCounter, msg.sender, _defendant);
@@ -496,7 +515,7 @@ contract ZKDataContract {
             d.defendant,
             d.accessRequestId,
             d.reason,
-            d.evidence.cid,
+            d.evidenceCid,
             d.isOpen,
             d.votesForGuilty,
             d.totalVotes
@@ -519,43 +538,8 @@ contract ZKDataContract {
 
         emit VotedOnDispute(_disputeId, msg.sender, _isGuilty);
 
-        // Check if the vote is decisive
-        uint256 notGuiltyVotes = d.totalVotes - d.votesForGuilty;
-        
-        if (d.votesForGuilty >= groupManagerThreshold) {
-            // Outcome A: Guilty. Slash defendant, reward complainant.
-            d.isOpen = false;
-            if (d.isZKDispute) {
-                // ZK dispute: transfer delegate's deposit to accuser's payout commitment
-                uint256 delegateDeposit = zkIdentity.deposits(d.identityCommitment);
-                if (delegateDeposit > 0) {
-                    // Add delegate's deposit to accuser's payout commitment in reward tree
-                    rewardTreeBalances[d.accuserPayoutCommitment] += delegateDeposit;
-                }
-                // Zero out the delegate's reward in the reward tree
-                if (rewardTreeBalances[d.payoutCommitment] > 0) {
-                    rewardTreeBalances[d.payoutCommitment] = 0;
-                }
-                // Remove delegate from identity tree by zeroing deposit
-                zkIdentity.slashAndReward(d.defendant, d.payoutCommitment, d.identityCommitment);
-            } else {
-                // Non-ZK dispute: use identity contract
-                identityContract.slashAndReward(d.defendant, d.complainant);
-            }
-            emit DisputeSettled(_disputeId, true);
-        } else if (notGuiltyVotes >= groupManagerThreshold) {
-            // Outcome B: Innocent. Slash (false accuser) complainant, reward defendant.
-            d.isOpen = false;
-            if (d.isZKDispute) {
-                // ZK dispute: use ZK-specific function
-                zkIdentity.rewardDefendant(d.defendant, d.complainant);
-            } else {
-                // Non-ZK dispute: use identity contract
-                identityContract.rewardDefendant(d.defendant, d.complainant);
-            }
-            emit DisputeSettled(_disputeId, false);
-        }
-        // If no threshold is met, the dispute remains open for more votes.
+        // Check if the vote is decisive and settle if so
+        _settleDispute(d, _disputeId);
     }
 
     // --- ZK REGULATION PHASE ---
@@ -606,7 +590,7 @@ contract ZKDataContract {
         
         require(req.status == RequestStatus.Responded || req.status == RequestStatus.CredentialsProvided, "Invalid status for dispute");
         require(_reason != DisputeReason.NONE, "Dispute reason cannot be NONE");
-        require(isValidIpfsCid(_evidenceCid), "Invalid IPFS CID format");
+        require(bytes(_evidenceCid).length >= 10 && bytes(_evidenceCid).length <= 200, "Invalid IPFS CID format");
 
         // 1. Validate actionId binds proof to this specific dispute
         require(input[1] == uint256(keccak256(abi.encodePacked(_requestId, uint256(_reason), "DISPUTE"))), "Invalid Action ID");
@@ -614,13 +598,8 @@ contract ZKDataContract {
         // 2. Validate Merkle Root
         require(zkIdentity.roots(input[0]), "Invalid Merkle Root");
 
-        // 3. Verify ZK Proof (inline conversion to reduce stack depth)
-        require(zkIdentity.verifyProof(
-            [uint(a[0]), uint(a[1])],
-            [[uint(b[0][0]), uint(b[0][1])], [uint(b[1][0]), uint(b[1][1])]],
-            [uint(c[0]), uint(c[1])],
-            [uint(input[0]), uint(input[1]), uint(input[2])]
-        ), "Invalid ZK Proof");
+        // 3. Verify ZK Proof
+        require(_verifyZKProof(a, b, c, input), "Invalid ZK Proof");
 
         // 4. Check nullifier to prevent replay
         bytes32 nullifierHash = bytes32(input[2]);
@@ -636,7 +615,7 @@ contract ZKDataContract {
         d.defendant = _defendant;
         d.accessRequestId = _requestId;
         d.reason = _reason;
-        d.evidence = IpfsCid(_evidenceCid);
+        d.evidenceCid = _evidenceCid;
         d.isOpen = true;
         d.payoutCommitment = _payoutCommitment;
         d.identityCommitment = _identityCommitment;
@@ -679,11 +658,7 @@ contract ZKDataContract {
         require(zkIdentity.roots(input[0]), "Invalid Merkle Root");
 
         // 3. Verify ZK Proof
-        uint[2] memory _a = [uint(a[0]), uint(a[1])];
-        uint[2][2] memory _b = [[uint(b[0][0]), uint(b[0][1])], [uint(b[1][0]), uint(b[1][1])]];
-        uint[2] memory _c = [uint(c[0]), uint(c[1])];
-        uint[3] memory _input = [uint(input[0]), uint(input[1]), uint(input[2])];
-        require(zkIdentity.verifyProof(_a, _b, _c, _input), "Invalid ZK Proof");
+        require(_verifyZKProof(a, b, c, input), "Invalid ZK Proof");
 
         // 4. Check nullifier to prevent double voting
         bytes32 nullifierHash = bytes32(input[2]);
@@ -702,62 +677,11 @@ contract ZKDataContract {
 
         emit ZKVotedOnDispute(_disputeId, nullifierHash, _isGuilty);
 
-        // Check if the vote is decisive
-        uint256 notGuiltyVotes = d.totalVotes - d.votesForGuilty;
-        
-        if (d.votesForGuilty >= groupManagerThreshold) {
-            // Outcome A: Guilty. Slash defendant, reward complainant.
-            d.isOpen = false;
-            if (d.isZKDispute) {
-                // ZK dispute: transfer delegate's deposit to accuser's payout commitment
-                uint256 delegateDeposit = zkIdentity.deposits(d.identityCommitment);
-                if (delegateDeposit > 0) {
-                    // Add delegate's deposit to accuser's payout commitment in reward tree
-                    rewardTreeBalances[d.accuserPayoutCommitment] += delegateDeposit;
-                }
-                // Zero out the delegate's reward in the reward tree
-                if (rewardTreeBalances[d.payoutCommitment] > 0) {
-                    rewardTreeBalances[d.payoutCommitment] = 0;
-                }
-                // Remove delegate from identity tree by zeroing deposit
-                zkIdentity.slashAndReward(d.defendant, d.payoutCommitment, d.identityCommitment);
-            } else {
-                // Non-ZK dispute: use identity contract
-                identityContract.slashAndReward(d.defendant, d.complainant);
-            }
-            emit DisputeSettled(_disputeId, true);
-        } else if (notGuiltyVotes >= groupManagerThreshold) {
-            // Outcome B: Innocent. Slash (false accuser) complainant, reward defendant.
-            d.isOpen = false;
-            if (d.isZKDispute) {
-                // ZK dispute: use ZK-specific function
-                zkIdentity.rewardDefendant(d.defendant, d.complainant);
-            } else {
-                // Non-ZK dispute: use identity contract
-                identityContract.rewardDefendant(d.defendant, d.complainant);
-            }
-            emit DisputeSettled(_disputeId, false);
-        }
-        // If no threshold is met, the dispute remains open for more votes.
+        // Check if the vote is decisive and settle if so
+        _settleDispute(d, _disputeId);
     }
 
     // --- DECOUPLED SHIELDED PAYOUTS ---
-
-    /**
-     * @dev Verify the reward proof using the reward verifier contract.
-     * @param _pA First proof parameter
-     * @param _pB Second proof parameter
-     * @param _pC Third proof parameter
-     * @param _pubSignals Public signals: [root, nullifierHash, recipient, relayerFee]
-     */
-    function verifyRewardProof(
-        uint[2] calldata _pA,
-        uint[2][2] calldata _pB,
-        uint[2] calldata _pC,
-        uint[4] memory _pubSignals
-    ) public view returns (bool) {
-        return rewardVerifier.verifyProof(_pA, _pB, _pC, _pubSignals);
-    }
 
     /**
      * @dev Claim a reward anonymously using a ZK proof.
@@ -788,7 +712,7 @@ contract ZKDataContract {
         // 2. Verify the reward proof
         // Public signals: [root, nullifierHash, recipient, relayerFee]
         uint[4] memory pubSignals = [_root, _nullifierHash, uint256(uint160(_recipient)), _relayerFee];
-        require(verifyRewardProof(_pA, _pB, _pC, pubSignals), "Invalid reward proof");
+        require(rewardVerifier.verifyProof(_pA, _pB, _pC, pubSignals), "Invalid reward proof");
 
         // 3. Mark the nullifier as spent
         spentPayoutNullifiers[_nullifierHash] = true;
