@@ -35,7 +35,7 @@ interface IRewardVerifier {
         uint[2] calldata _pA,
         uint[2][2] calldata _pB,
         uint[2] calldata _pC,
-        uint[4] memory _pubSignals
+        uint[2] memory _pubSignals
     ) external view returns (bool);
 }
 
@@ -710,8 +710,8 @@ contract ZKDataContract {
         require(!spentPayoutNullifiers[_nullifierHash], "Reward already claimed");
 
         // 2. Verify the reward proof
-        // Public signals: [root, nullifierHash, recipient, relayerFee]
-        uint[4] memory pubSignals = [_root, _nullifierHash, uint256(uint160(_recipient)), _relayerFee];
+        // Public signals: [root, nullifierHash] (recipient and relayerFee are contract parameters, not circuit inputs)
+        uint[2] memory pubSignals = [_root, _nullifierHash];
         require(rewardVerifier.verifyProof(_pA, _pB, _pC, pubSignals), "Invalid reward proof");
 
         // 3. Mark the nullifier as spent
@@ -758,5 +758,15 @@ contract ZKDataContract {
         require(testingMode, "Not in testing mode");
         require(msg.value > 0, "Must send ETH");
         rewardTreeBalances[_payoutCommitment] = msg.value;
+    }
+    
+    /**
+     * @dev Test helper to register a reward tree root for benchmarking
+     * Only callable in testing mode
+     */
+    function setRewardTreeRoot(uint256 _root) external {
+        require(testingMode, "Not in testing mode");
+        rewardTreeRoots[_root] = true;
+        currentRewardTreeRoot = _root;
     }
 }

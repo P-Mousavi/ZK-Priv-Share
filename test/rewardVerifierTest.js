@@ -33,48 +33,59 @@ describe("Reward Verifier Direct Test", function () {
     // Compute nullifier hash
     const nullifierHash = await poseidonHash(payoutSecret);
     
-    // Public inputs
-    const recipient = BigInt("0x" + "1234".repeat(10));
-    const relayerFee = BigInt("0");
-    
-    // Circuit input
+    // Circuit input (recipient and relayerFee are no longer part of the circuit)
     const input = {
       payoutSecret: payoutSecret.toString(),
       pathElements: proof.pathElements.map(e => e.toString()),
       pathIndices: proof.pathIndices,
       root: root.toString(),
-      nullifierHash: nullifierHash.toString(),
-      recipient: recipient.toString(),
-      relayerFee: relayerFee.toString()
+      nullifierHash: nullifierHash.toString()
     };
-    
+
     // Generate Groth16 proof
     const wasmPath = path.join(__dirname, "../circuits/build/reward_js/reward.wasm");
     const zkeyPath = path.join(__dirname, "../circuits/build/reward_final.zkey");
-    
+
     const { proof: snarkProof, publicSignals } = await groth16.fullProve(input, wasmPath, zkeyPath);
-    
+
     console.log("Public signals from proof:", publicSignals);
-    console.log("Expected:", [root.toString(), nullifierHash.toString(), recipient.toString(), relayerFee.toString()]);
+    console.log("Expected:", [root.toString(), nullifierHash.toString()]);
+    const fieldSize = BigInt("21888242871839275222246405745257275088548364400416034343698204186575808495617");
+    console.log("Field size:", fieldSize.toString());
+    console.log("Root in field:", BigInt(publicSignals[0]) < fieldSize);
+    console.log("Nullifier in field:", BigInt(publicSignals[1]) < fieldSize);
     
     // Convert to Solidity format
-    const pA = [ethers.getBigInt(snarkProof.pi_a[0]), ethers.getBigInt(snarkProof.pi_a[1])];
+    const pA = [BigInt(snarkProof.pi_a[0]), BigInt(snarkProof.pi_a[1])];
     const pB = [
-      [ethers.getBigInt(snarkProof.pi_b[0][0]), ethers.getBigInt(snarkProof.pi_b[0][1])],
-      [ethers.getBigInt(snarkProof.pi_b[1][0]), ethers.getBigInt(snarkProof.pi_b[1][1])]
+      [BigInt(snarkProof.pi_b[0][0]), BigInt(snarkProof.pi_b[0][1])],
+      [BigInt(snarkProof.pi_b[1][0]), BigInt(snarkProof.pi_b[1][1])]
     ];
-    const pC = [ethers.getBigInt(snarkProof.pi_c[0]), ethers.getBigInt(snarkProof.pi_c[1])];
-    
+    const pC = [BigInt(snarkProof.pi_c[0]), BigInt(snarkProof.pi_c[1])];
+
     const pubSignals = [
-      ethers.getBigInt(publicSignals[0]),
-      ethers.getBigInt(publicSignals[1]),
-      ethers.getBigInt(publicSignals[2]),
-      ethers.getBigInt(publicSignals[3])
+      BigInt(publicSignals[0]),
+      BigInt(publicSignals[1])
     ];
-    
-    // Verify directly
-    const result = await rewardVerifier.verifyProof(pA, pB, pC, pubSignals);
-    console.log("Verification result:", result);
+
+    // Verify using snarkjs directly
+    const vk = require("../circuits/build/verification_key.json");
+    const snarkjsResult = await groth16.verify(vk, publicSignals, snarkProof);
+    console.log("snarkjs verification result:", snarkjsResult);
+
+    // Use snarkjs callContract to get the correct format
+    const callData = await groth16.exportSolidityCallData(snarkProof, publicSignals);
+    console.log("Call data:", callData);
+
+    // Call the contract using the call data format
+    const callDataArray = JSON.parse(`[${callData}]`);
+    const result = await rewardVerifier.verifyProof(
+      callDataArray[0],
+      callDataArray[1],
+      callDataArray[2],
+      callDataArray[3]
+    );
+    console.log("Verification result with callData format:", result);
     expect(result).to.be.true;
   });
 });

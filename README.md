@@ -11,18 +11,21 @@ This repository demonstrates a flow where a delegate proves membership in a Merk
 ## Project Layout
 
 - `circuits/identity.circom`: main ZK circuit (`JoinIdentity`)
+- `circuits/reward.circom`: reward claiming circuit (`ClaimReward`)
 - `circuits/lib/merkleTree.circom`: Poseidon Merkle inclusion circuit
-- `circuits/input.json`: generated circuit witness input
+- `circuits/input.json`: generated identity circuit witness input
+- `circuits/reward_input.json`: generated reward circuit witness input
 - `circuits/build/`: generated circuit compiler and proof artifacts
 - `config/config.json`: deployment settings (`identityContract`, `threshold`)
 - `config/InitialManagers.json`: initial group manager addresses
 - `deployments/localhost/`: generated contract deployment records
-- `contracts/`: Solidity source only (`Verifier.sol` is generated during circuit build)
+- `contracts/`: Solidity source (`Verifier.sol` and `RewardVerifier.sol` are generated during circuit build)
 - `scripts/build.sh`: compile circuit, generate proving/verifying keys, generate proof, export verifier
-- `scripts/generateMerkleTree.js`: generate sample `circuits/input.json` for the circuit
+- `scripts/generateMerkleTree.js`: generate sample `circuits/input.json` for the identity circuit
 - `scripts/InitializeEntities.js`: populate manager and delegate list and threshold for local dev
 - `scripts/deploy.js`: deploy script for Solidity contracts
 - `scripts/syncConfig.js`: sync `identityContract` in config from latest deployment
+- `test/helpers/rewardProofHelper.js`: helper functions for reward proof generation and conversion
 
 ## What This Prototype Covers
 
@@ -76,7 +79,7 @@ Located in `circuits/reward.circom`, this circuit verifies:
 - Knowledge of a `payoutSecret` that exists in the reward tree
 - Merkle proof of inclusion for the commitment
 - Outputs a `nullifierHash` to prevent double-claiming
-- Accepts public signals: `root`, `nullifierHash`, `recipient`, `relayerFee`
+- Accepts public signals: `root`, `nullifierHash` (recipient and relayerFee are contract parameters, not circuit inputs)
 
 **Contract Functions**
 
@@ -102,15 +105,20 @@ Located in `circuits/reward.circom`, this circuit verifies:
 
 To deploy the updated system:
 
-1. Deploy `RewardVerifier.sol` (mock version for testing, replace with real verifier after circuit compilation)
-2. Deploy `ZKData.sol` with the new constructor parameter `_rewardVerifier`
-
+1. Build the reward circuit and generate the verifier:
 ```bash
-node scripts/deploy.js -c ClaimVerifier.sol
-node scripts/deploy.js -c ZKData.sol
+bash scripts/build.sh -c reward -i circuits/reward_input.json
 ```
 
-Note: The real `RewardVerifier.sol` should be generated from the `reward.circom` circuit using the build script once the circuit compilation issues are resolved.
+2. Deploy `RewardVerifier.sol` (auto-generated from `reward.circom`)
+```bash
+node scripts/deploy.js -c RewardVerifier.sol
+```
+
+3. Deploy `ZKData.sol` with the new constructor parameter `_rewardVerifier`
+```bash
+node scripts/deploy.js -c ZKData.sol
+```
 
 ---
 
@@ -224,36 +232,51 @@ The generated input contains:
 - `root`
 - `actionId`
 
+For the reward circuit, the input file `circuits/reward_input.json` should contain:
+
+- `payoutSecret`
+- `pathElements`
+- `pathIndices`
+- `root`
+- `nullifierHash`
+
 ---
 
 ## 4) Build Circuit + Proof + Verifier
 
-Run:
+### Build Identity Circuit
 
 ```bash
 bash scripts/build.sh -c identity -i input.json
 ```
 
+### Build Reward Circuit
+
+```bash
+bash scripts/build.sh -c reward -i circuits/reward_input.json
+```
+
 The script does all of the following:
 
 1. Cleans old build artifacts.
-2. Compiles `circuits/identity.circom`.
+2. Compiles the specified circuit (`identity.circom` or `reward.circom`).
 3. Generates witness.
 4. Runs Powers of Tau (demo setup).
 5. Runs Groth16 setup and key contribution.
 6. Exports `verification_key.json`.
 7. Generates `proof.json` and `public.json`.
 8. Verifies proof locally with SnarkJS.
-9. Exports Solidity verifier to `contracts/Verifier.sol`.
+9. Exports Solidity verifier to `contracts/Verifier.sol` (for identity) or `contracts/RewardVerifier.sol` (for reward).
 10. Adds `virtual` to verifier method signature for inheritance compatibility.
+11. Fixes pragma version to `^0.8.20`.
 
 Expected generated artifacts (in `circuits/build`):
 
-- `identity.r1cs`
-- `identity.sym`
-- `identity_js/*` (WASM + witness code)
+- `<circuit>.r1cs`
+- `<circuit>.sym`
+- `<circuit>_js/*` (WASM + witness code)
 - `witness.wtns`
-- `identity_final.zkey`
+- `<circuit>_final.zkey`
 - `verification_key.json`
 - `proof.json`
 - `public.json`
@@ -308,7 +331,7 @@ This writes:
 
 ### 6.3 Deploy `RewardVerifier.sol`
 
-Deploy the reward verifier contract (currently a mock for testing):
+Deploy the reward verifier contract (auto-generated from `reward.circom`):
 
 ```bash
 node scripts/deploy.js -c RewardVerifier.sol
@@ -317,7 +340,7 @@ node scripts/deploy.js -c RewardVerifier.sol
 This writes:
 - `deployments/localhost/RewardVerifier.json`
 
-Note: The real RewardVerifier should be generated from `reward.circom` using the build script. The current version is a mock that always returns true for testing purposes.
+Note: Ensure you have built the reward circuit first using `bash scripts/build.sh -c reward -i circuits/reward_input.json` to generate the verifier contract.
 
 ### 6.4 Deploy `ZKData.sol`
 
@@ -378,11 +401,12 @@ The contract flow enforces:
 4. `node scripts/deploy.js -c Identity.sol`
 5. `node scripts/generateMerkleTree.js`
 6. `bash scripts/build.sh -c identity -i input.json`
-7. Start local chain on `127.0.0.1:8545`
-8. `node scripts/deploy.js -c ZKIdentity.sol`
-9. `node scripts/deploy.js -c RewardVerifier.sol`
-10. `node scripts/deploy.js -c ZKData.sol`
-11. Use generated `proof.json` + `public.json` in contract interaction scripts/tests
+7. `bash scripts/build.sh -c reward -i circuits/reward_input.json`
+8. Start local chain on `127.0.0.1:8545`
+9. `node scripts/deploy.js -c ZKIdentity.sol`
+10. `node scripts/deploy.js -c RewardVerifier.sol`
+11. `node scripts/deploy.js -c ZKData.sol`
+12. Use generated `proof.json` + `public.json` in contract interaction scripts/tests
 
 ---
 
@@ -485,6 +509,7 @@ Helper functions are provided in `test/helpers/`:
 - `merkle.ts` - Merkle tree construction and proof generation
 - `poseidon.ts` - Poseidon hash functions
 - `proofs.ts` - ZK proof generation and verification
+- `rewardProofHelper.js` - Reward proof generation and Solidity format conversion using snarkjs
 
 ---
 

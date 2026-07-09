@@ -12,8 +12,6 @@ template ClaimReward(levels) {
     // 2. Public Inputs (Context)
     signal input root;           // Merkle Root of reward tree
     signal input nullifierHash;  // Hash of payoutSecret to prevent double-claiming
-    signal input recipient;      // Address to receive the reward
-    signal input relayerFee;     // Fee to pay the relayer
 
     // --- Logic ---
 
@@ -21,23 +19,23 @@ template ClaimReward(levels) {
     // The commitment is Poseidon(payoutSecret)
     component commHasher = Poseidon(1);
     commHasher.inputs[0] <== payoutSecret;
-    
+
     // B. Verify Merkle Proof (Commitment exists in the reward tree)
     component treeVerifier = MerkleTreeInclusionProof(levels);
     treeVerifier.leaf <== commHasher.out;
     treeVerifier.pathIndices <== pathIndices;
     treeVerifier.pathElements <== pathElements;
-    
+
     // The calculated root must match the public root provided by the contract
-    treeVerifier.root === root; 
+    treeVerifier.root === root;
 
     // C. Generate Nullifier Hash (To prevent double-claiming)
     // The nullifier is Poseidon(payoutSecret)
     component nullifierHasher = Poseidon(1);
     nullifierHasher.inputs[0] <== payoutSecret;
-    
+
     // The calculated nullifier must match the public nullifier provided
     nullifierHasher.out === nullifierHash;
 }
 
-component main {public [root, nullifierHash, recipient, relayerFee]} = ClaimReward(5);
+component main {public [root, nullifierHash]} = ClaimReward(5);
