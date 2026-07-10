@@ -51,8 +51,8 @@ fi
 CWD=$(dirname "${BASH_SOURCE[0]}")/../circuits
 cd $CWD
 
-echo ">>> Cleaning previous build..."
-rm -rf build *.zkey pot*.ptau witness.wtns proof.json public.json verification_key.json 2>/dev/null
+echo ">>> Cleaning previous build for $CIRCUIT..."
+rm -rf build/${CIRCUIT}_js build/${CIRCUIT}.r1cs build/${CIRCUIT}.sym build/${CIRCUIT}_*.zkey build/witness.wtns build/proof.json build/public.json build/verification_key.json 2>/dev/null
 
 mkdir -p build
 
@@ -69,18 +69,18 @@ node build/${CIRCUIT}_js/generate_witness.js \
 
 echo ">>> Setting up Powers of Tau (ptau)..."
 npx snarkjs powersoftau new bn128 12 build/pot12_0000.ptau -v
-npx snarkjs powersoftau contribute build/pot12_0000.ptau build/pot12_0001.ptau --name="first contribution" -v
+printf "%s" "$(openssl rand -hex 32)" | npx snarkjs powersoftau contribute build/pot12_0000.ptau build/pot12_0001.ptau --name="first contribution" -v -e
 npx snarkjs powersoftau prepare phase2 build/pot12_0001.ptau build/pot12_final.ptau -v
 
 echo ">>> Groth16 setup..."
 npx snarkjs groth16 setup build/$CIRCUIT.r1cs build/pot12_final.ptau build/${CIRCUIT}_0000.zkey
-npx snarkjs zkey contribute build/${CIRCUIT}_0000.zkey build/${CIRCUIT}_final.zkey --name="key contribution" -v
+printf "%s" "$(openssl rand -hex 32)" | npx snarkjs zkey contribute build/${CIRCUIT}_0000.zkey build/${CIRCUIT}_final.zkey --name="key contribution" -v -e
 
 echo ">>> Exporting verification key..."
 npx snarkjs zkey export verificationkey build/${CIRCUIT}_final.zkey build/verification_key.json
 
 echo ">>> Generating proof..."
-npx snarkjs groth16 prove build/${CIRCUIT}_final.zkey build/witness.wtns build/proof.json build/public.json
+npx snarkjs groth16 prove build/${CIRCUIT}_final.zkey build/witness.wtns build/proof.json build/public.json 
 
 echo ">>> Verifying proof..."
 npx snarkjs groth16 verify build/verification_key.json build/public.json build/proof.json

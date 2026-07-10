@@ -107,7 +107,7 @@ To deploy the updated system:
 
 1. Build the reward circuit and generate the verifier:
 ```bash
-bash scripts/build.sh -c reward -i circuits/reward_input.json
+bash scripts/build.sh -c reward -i reward_input.json
 ```
 
 2. Deploy `RewardVerifier.sol` (auto-generated from `reward.circom`)
@@ -253,7 +253,7 @@ bash scripts/build.sh -c identity -i input.json
 ### Build Reward Circuit
 
 ```bash
-bash scripts/build.sh -c reward -i circuits/reward_input.json
+bash scripts/build.sh -c reward -i reward_input.json
 ```
 
 The script does all of the following:
@@ -340,7 +340,7 @@ node scripts/deploy.js -c RewardVerifier.sol
 This writes:
 - `deployments/localhost/RewardVerifier.json`
 
-Note: Ensure you have built the reward circuit first using `bash scripts/build.sh -c reward -i circuits/reward_input.json` to generate the verifier contract.
+Note: Ensure you have built the reward circuit first using `bash scripts/build.sh -c reward -i reward_input.json` to generate the verifier contract.
 
 ### 6.4 Deploy `ZKData.sol`
 
@@ -401,7 +401,7 @@ The contract flow enforces:
 4. `node scripts/deploy.js -c Identity.sol`
 5. `node scripts/generateMerkleTree.js`
 6. `bash scripts/build.sh -c identity -i input.json`
-7. `bash scripts/build.sh -c reward -i circuits/reward_input.json`
+7. `bash scripts/build.sh -c reward -i reward_input.json`
 8. Start local chain on `127.0.0.1:8545`
 9. `node scripts/deploy.js -c ZKIdentity.sol`
 10. `node scripts/deploy.js -c RewardVerifier.sol`

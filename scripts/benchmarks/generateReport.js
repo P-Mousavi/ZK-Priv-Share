@@ -308,22 +308,68 @@ class ReportGenerator {
     markdown += `### Proof Generation Times\n\n`;
     markdown += `| Circuit | Generation Time | Memory Usage | Verification Time |\n`;
     markdown += `|---------|-----------------|--------------|------------------|\n`;
-    markdown += `| Identity | ~5-8 seconds | ~150-250 MB | ~50-100 ms |\n`;
-    markdown += `| Reward | ~7-11 seconds | ~200-300 MB | ~50-100 ms |\n\n`;
+    
+    // Extract actual proof generation data
+    const offchainResults = Array.isArray(this.benchmarkResults.offchain) ? this.benchmarkResults.offchain : [];
+    const identityProof = offchainResults.find(r => r.operation === "proof generation" && r.circuit === "identity.circom");
+    const rewardProof = offchainResults.find(r => r.operation === "proof generation" && r.circuit === "reward.circom");
+    const hashData = offchainResults.find(r => r.operation === "hash computation");
+    const treeData = offchainResults.find(r => r.operation === "tree construction");
+    
+    if (identityProof) {
+      const avgTime = (identityProof.timeMs / identityProof.numProofs).toFixed(0);
+      markdown += `| Identity | ${avgTime} ms (avg) | ${identityProof.memoryMB.toFixed(0)} MB | ~50-100 ms |\n`;
+    } else {
+      markdown += `| Identity | ~5-8 seconds | ~150-250 MB | ~50-100 ms |\n`;
+    }
+    
+    if (rewardProof) {
+      const avgTime = (rewardProof.timeMs / rewardProof.numProofs).toFixed(0);
+      markdown += `| Reward | ${avgTime} ms (avg) | ${rewardProof.memoryMB.toFixed(0)} MB | ~50-100 ms |\n`;
+    } else {
+      markdown += `| Reward | ~7-11 seconds | ~200-300 MB | ~50-100 ms |\n`;
+    }
+    markdown += `\n`;
     
     markdown += `### Component Analysis\n\n`;
     markdown += `**Poseidon Hash Operations:**\n`;
-    markdown += `- Speed: <1ms per hash\n`;
+    if (hashData) {
+      markdown += `- Speed: ${hashData.avgTimePerHash} ms per hash (${hashData.iterations} iterations)\n`;
+      markdown += `- Memory: ${hashData.memoryMB.toFixed(0)} MB\n`;
+    } else {
+      markdown += `- Speed: <1ms per hash\n`;
+    }
     markdown += `- Usage: Commitment computation, tree operations\n\n`;
     
     markdown += `**Merkle Tree Operations:**\n`;
-    markdown += `- Construction: Scales with depth and leaf count\n`;
-    markdown += `- Path verification: ~5-10ms for depth=20\n\n`;
+    if (treeData) {
+      markdown += `- Construction: ${treeData.timeMs} ms (avg over ${treeData.iterations} iterations)\n`;
+      markdown += `- Configuration: Depth ${treeData.depth}, ${treeData.leaves} leaves\n`;
+      markdown += `- Memory: ${treeData.memoryMB.toFixed(0)} MB\n`;
+    } else {
+      markdown += `- Construction: Scales with depth and leaf count\n`;
+      markdown += `- Path verification: ~5-10ms for depth=20\n`;
+    }
+    markdown += `\n`;
     
     markdown += `**Circuit Compilation:**\n`;
-    markdown += `- One-time cost per circuit\n`;
-    markdown += `- Identity circuit: ~2-5 minutes\n`;
-    markdown += `- Reward circuit: ~3-7 minutes\n\n`;
+    const identityCompilation = offchainResults.find(r => r.operation === "circuit compilation" && r.circuit === "identity.circom");
+    const rewardCompilation = offchainResults.find(r => r.operation === "circuit compilation" && r.circuit === "reward.circom");
+    
+    if (identityCompilation) {
+      const timeSec = (identityCompilation.timeMs / 1000).toFixed(1);
+      markdown += `- Identity circuit: ${timeSec}s (${identityCompilation.memoryMB.toFixed(0)} MB)\n`;
+    } else {
+      markdown += `- Identity circuit: ~2-5 minutes\n`;
+    }
+    
+    if (rewardCompilation) {
+      const timeSec = (rewardCompilation.timeMs / 1000).toFixed(1);
+      markdown += `- Reward circuit: ${timeSec}s (${rewardCompilation.memoryMB.toFixed(0)} MB)\n`;
+    } else {
+      markdown += `- Reward circuit: ~3-7 minutes\n`;
+    }
+    markdown += `- One-time cost per circuit\n\n`;
     
     markdown += `### User Experience Impact\n\n`;
     markdown += `The off-chain proving requirements significantly impact user experience:\n`;
