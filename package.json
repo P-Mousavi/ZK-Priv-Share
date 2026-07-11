@@ -21,6 +21,7 @@
     "circomlibjs": "^0.1.7",
     "dotenv": "^17.2.3",
     "ethers": "^6.15.0",
+    "poseidon-solidity": "^0.0.5",
     "snarkjs": "^0.7.5",
     "solc": "^0.8.30"
   },

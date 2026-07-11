@@ -1,5 +1,6 @@
 const { expect } = require("chai");
 const { ethers } = require("hardhat");
+const { poseidonHash } = require("../helpers/poseidon");
 
 describe("Identity & Registration Phase Gas Benchmarks", function () {
   let identityContract, zkIdentityContract;
@@ -66,7 +67,7 @@ describe("Identity & Registration Phase Gas Benchmarks", function () {
 
   describe("ZK: registerIdentity()", function () {
     it("Benchmark: Single identity registration with Merkle tree insertion", async function () {
-      const identityCommitment = ethers.keccak256(ethers.toUtf8Bytes("identity1"));
+      const identityCommitment = await poseidonHash(BigInt(ethers.keccak256(ethers.toUtf8Bytes("identity1"))));
       
       const tx = await zkIdentityContract.connect(org1).registerIdentity(identityCommitment, { 
         value: REGISTRATION_DEPOSIT 
@@ -81,7 +82,7 @@ describe("Identity & Registration Phase Gas Benchmarks", function () {
 
       for (let i = 0; i < 5; i++) {
         const org = [org1, org2, org3, org4, org5][i];
-        const identityCommitment = ethers.keccak256(ethers.toUtf8Bytes(`identity${i + 1}`));
+        const identityCommitment = await poseidonHash(BigInt(ethers.keccak256(ethers.toUtf8Bytes(`identity${i + 1}`))));
         
         const tx = await zkIdentityContract.connect(org).registerIdentity(identityCommitment, { 
           value: REGISTRATION_DEPOSIT 
@@ -96,7 +97,7 @@ describe("Identity & Registration Phase Gas Benchmarks", function () {
     });
 
     it("Benchmark: Gas overhead of Merkle tree insertion vs mapping storage", async function () {
-      const identityCommitment = ethers.keccak256(ethers.toUtf8Bytes("identity1"));
+      const identityCommitment = await poseidonHash(BigInt(ethers.keccak256(ethers.toUtf8Bytes("identity1"))));
       
       const tx = await zkIdentityContract.connect(org1).registerIdentity(identityCommitment, { 
         value: REGISTRATION_DEPOSIT 
@@ -111,7 +112,7 @@ describe("Identity & Registration Phase Gas Benchmarks", function () {
   describe("Comparative Analysis: Standard vs ZK Registration", function () {
     it("Direct comparison: Single registration", async function () {
       const ipfsCid = "QmTest1234567890abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ";
-      const identityCommitment = ethers.keccak256(ethers.toUtf8Bytes("identity1"));
+      const identityCommitment = await poseidonHash(BigInt(ethers.keccak256(ethers.toUtf8Bytes("identity1"))));
 
       // Standard registration
       const standardTx = await identityContract.connect(org1).registerOrganisation(ipfsCid, { 
@@ -155,7 +156,7 @@ describe("Identity & Registration Phase Gas Benchmarks", function () {
         standardGasCosts.push(standardReceipt.gasUsed);
 
         // ZK registration (use different commitments)
-        const identityCommitment = ethers.keccak256(ethers.toUtf8Bytes(`identity${i + 100}`));
+        const identityCommitment = await poseidonHash(BigInt(ethers.keccak256(ethers.toUtf8Bytes(`identity${i + 100}`))));
         const zkTx = await zkIdentityContract.connect(signers[i + 5]).registerIdentity(identityCommitment, {
           value: REGISTRATION_DEPOSIT
         });

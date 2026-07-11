@@ -111,16 +111,19 @@ function extractContractName(source, fileName) {
         .replace(/\/\/.*$/gm, "");
 
     const contractMatches = [...withoutComments.matchAll(/\bcontract\s+(\w+)/g)];
-    if (contractMatches.length === 0) {
-        throw new Error(`No contract found in ${fileName}`);
+    const libraryMatches = [...withoutComments.matchAll(/\blibrary\s+(\w+)/g)];
+    
+    const allMatches = [...contractMatches, ...libraryMatches];
+    
+    if (allMatches.length === 0) {
+        throw new Error(`No contract or library found in ${fileName}`);
     }
 
-    const allContracts = contractMatches.map((match) => match[1]);
-    const mainContract = allContracts.find(name =>
+    const allNames = allMatches.map((match) => match[1]);
+    const mainContract = allNames.find(name =>
         !name.includes("Interface") &&
-        !name.includes("Library") &&
         !name.includes("Verifier")
-    ) || allContracts[0];
+    ) || allNames[0];
 
     return mainContract;
 }

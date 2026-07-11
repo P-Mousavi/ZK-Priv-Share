@@ -329,6 +329,8 @@ This writes:
 
 - `deployments/localhost/ZKIdentity.json`
 
+Note: `ZKIdentity.sol` implements a simplified Poseidon hash function internally for merkle tree operations. **Important**: For full ZK compatibility with circom circuits, the merkle tree computation should be performed off-chain using circomlibjs, and only the final root should be submitted to the contract for verification. The on-chain poseidon implementation is provided for basic functionality but may not match the exact circomlib output due to the complexity of the full Poseidon round structure.
+
 ### 6.3 Deploy `RewardVerifier.sol`
 
 Deploy the reward verifier contract (auto-generated from `reward.circom`):
@@ -403,10 +405,11 @@ The contract flow enforces:
 6. `bash scripts/build.sh -c identity -i input.json`
 7. `bash scripts/build.sh -c reward -i reward_input.json`
 8. Start local chain on `127.0.0.1:8545`
-9. `node scripts/deploy.js -c ZKIdentity.sol`
-10. `node scripts/deploy.js -c RewardVerifier.sol`
-11. `node scripts/deploy.js -c ZKData.sol`
-12. Use generated `proof.json` + `public.json` in contract interaction scripts/tests
+9. `node scripts/deploy.js -c PoseidonT2.sol`
+10. `node scripts/deploy.js -c ZKIdentity.sol`
+11. `node scripts/deploy.js -c RewardVerifier.sol`
+12. `node scripts/deploy.js -c ZKData.sol`
+13. Use generated `proof.json` + `public.json` in contract interaction scripts/tests
 
 ---
 
