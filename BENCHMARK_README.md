@@ -75,9 +75,55 @@ Results are saved to:
 - **Reward proof**: 7-11 seconds, ~200-300 MB memory
 - **Verification**: 50-100 ms
 
+## Note-Based Reward System Benchmarks
+
+The reward system now uses a note-based architecture with fixed denominations. Benchmarks measure the privacy-cost tradeoff of splitting rewards into multiple notes.
+
+### Multi-Note Minting Benchmarks
+
+The `RewardPhase.bench.js` suite includes benchmarks for minting different numbers of reward notes:
+
+```bash
+npx hardhat test test/benchmarks/RewardPhase.bench.js --grep "Multi-Note Minting"
+```
+
+**Benchmarks include:**
+- Minting 1 reward note (baseline)
+- Minting 3 reward notes
+- Minting 5 reward notes
+- Minting 9 reward notes
+- Minting 20 reward notes
+- Privacy-cost tradeoff analysis
+
+### Privacy-Cost Tradeoff Analysis
+
+The system allows tuning privacy vs gas cost by choosing note count:
+
+- **1 note**: ~40,000-60,000 gas (baseline), exact denomination revealed
+- **3 notes**: ~80,000-120,000 gas (2-3x), denomination hidden among possibilities
+- **5 notes**: ~120,000-180,000 gas (3-4x), moderate denomination privacy
+- **9 notes**: ~200,000-300,000 gas (5-6x), strong denomination privacy
+- **20 notes**: ~400,000-600,000 gas (10-12x), very strong denomination privacy
+
+**Key insight:** Gas cost scales approximately linearly with note count during minting, while claiming cost remains constant per note. This allows academic measurement of the privacy-cost tradeoff.
+
+### Reward Decomposition Example
+
+The `decomposeReward()` function decomposes arbitrary amounts into fixed denominations:
+
+```javascript
+// Example: 0.135 ETH decomposes into:
+// 1 x 0.1 ETH
+// 3 x 0.01 ETH
+// 5 x 0.001 ETH
+```
+
+This decomposition enables denomination privacy while preserving a single global anonymity set.
+
 ## Notes
 
 - Some benchmarks use estimated values where valid ZK proofs are not available
 - For accurate proof verification benchmarks, generate valid proofs using the circom circuits
 - Gas costs are measured on Hardhat network (chainId: 31337)
 - All benchmarks include statistical analysis where applicable
+- Multi-note minting benchmarks demonstrate the privacy-cost tradeoff for academic analysis

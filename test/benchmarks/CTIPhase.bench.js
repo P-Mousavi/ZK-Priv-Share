@@ -226,7 +226,8 @@ describe("CTI Submission & Consumption Phase Gas Benchmarks", function () {
         const responseTx = await zkDataContract.provideResponseZK(
           1, // requestId (would need to be extracted from requestAccess event)
           responseIpfsCid,
-          payoutCommitment,
+          [payoutCommitment],
+          [ethers.parseEther("1")],
           a, b, c, input
         );
         const receipt = await responseTx.wait();

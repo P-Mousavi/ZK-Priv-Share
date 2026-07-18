@@ -89,8 +89,8 @@ class ProofHelper {
   /**
    * Generate a reward claim proof
    */
-  async generateRewardProof(payoutSecret, recipient, relayerFee = 0n) {
-    const commitment = await this.poseidonHash(payoutSecret);
+  async generateRewardProof(secret, recipient, relayerFee = 0n, denomination = ethers.parseEther("1"), nullifier = this.randomFieldElement()) {
+    const commitment = await this.poseidonHash([denomination, secret, nullifier]);
     
     // Create Merkle tree with the commitment
     const leaves = [commitment, this.randomFieldElement(), this.randomFieldElement(), this.randomFieldElement()];
@@ -98,17 +98,17 @@ class ProofHelper {
     const merkleProof = merkleProofs[0];
     
     // Compute nullifier hash
-    const nullifierHash = await this.poseidonHash(payoutSecret);
+    const nullifierHash = await this.poseidonHash(nullifier);
     
     // Circuit input
     const input = {
-      payoutSecret: payoutSecret.toString(),
+      secret: secret.toString(),
+      nullifier: nullifier.toString(),
       pathElements: merkleProof.pathElements.map(e => e.toString()),
       pathIndices: merkleProof.pathIndices,
       root: root.toString(),
-      nullifierHash: nullifierHash.toString(),
-      recipient: recipient.toString(),
-      relayerFee: relayerFee.toString()
+      denomination: denomination.toString(),
+      nullifierHash: nullifierHash.toString()
     };
     
     // Generate Groth16 proof
@@ -145,10 +145,12 @@ class ProofHelper {
       publicSignals: convertProof(publicSignals),
       input: {
         root: root,  // Already a BigInt from poseidonHash
+        denomination: denomination,
         nullifierHash: nullifierHash,  // Already a BigInt from poseidonHash
         recipient: recipient,
         relayerFee: relayerFee  // Already a BigInt
-      }
+      },
+      noteCommitment: commitment
     };
   }
 

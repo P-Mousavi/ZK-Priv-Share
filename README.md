@@ -47,49 +47,65 @@ The system implements a privacy-enhancing architecture that separates the CTI su
 
 ### Architecture Overview
 
-**Step 1: CTI Submission & Reward Minting (Link-Breaking)**
+**Step 1: CTI Submission & Reward Note Minting (Link-Breaking)**
 
 When a delegate submits a valid response via a relayer:
 
-1. The delegate generates an ephemeral secret off-chain: `payoutSecret`
-2. They calculate a public commitment: `payoutCommitment = Poseidon(payoutSecret)`
-3. The relayer calls `provideResponseZK()`, passing the `payoutCommitment` as a public signal
-4. The ZKDataContract verifies the identity/submission proof
-5. Instead of moving Ether to a wallet, the contract inserts the `payoutCommitment` into the reward tree and updates the balance for that commitment to equal the reward amount
+1. The delegate generates multiple ephemeral secrets off-chain: `secret`, `nullifier` for each note
+2. They calculate public commitments: `noteCommitment = Poseidon(denomination, secret, nullifier)`
+3. The reward amount is decomposed into fixed denominations (e.g., 0.135 ETH → 0.1 + 3×0.01 + 5×0.001)
+4. The relayer calls `provideResponseZK()`, passing arrays of `rewardNoteCommitments` and `rewardNoteDenominations`
+5. The ZKDataContract verifies the identity/submission proof
+6. The contract validates that denominations sum to the expected reward amount and inserts all notes into the single reward tree
+7. Each note's denomination is recorded in the `rewardNoteDenominations` mapping
 
-At this point, the blockchain knows a reward was minted for a valid CTI response, but it does not know who owns the `payoutSecret` associated with that leaf.
+At this point, the blockchain knows reward notes were minted for a valid CTI response, but it does not know who owns the secrets associated with those leaves.
 
 **Step 2: Anonymous Reward Extraction (The Privacy Loop)**
 
-Days or weeks later, when the anonymity set of the Reward Merkle Tree has grown sufficiently large, the delegate withdraws the funds to a completely fresh, unlinked address:
+Days or weeks later, when the anonymity set of the Reward Merkle Tree has grown sufficiently large, the delegate withdraws individual notes to completely fresh, unlinked addresses:
 
-1. The delegate constructs a ZK proof using the `reward.circom` circuit
-2. The circuit takes `payoutSecret` and the Merkle membership proof for the Reward Tree as private inputs
-3. The circuit outputs a deterministic `payoutNullifier = Poseidon(payoutSecret)` to prevent double-claiming
-4. The circuit accepts public variables: `root`, `recipient`, `relayerFee`
-5. The delegate sends this proof to a Gas Relayer (or uses an ERC-4337 Paymaster)
-6. The relayer submits the transaction to the `claimReward()` function on the contract
-7. The contract verifies the proof, checks that the `payoutNullifier` has not been spent, and transfers the funds directly to the fresh `recipientAddress`
+1. The delegate constructs a ZK proof using the `reward.circom` circuit for a specific note
+2. The circuit takes `secret`, `nullifier`, and the Merkle membership proof for the Reward Tree as private inputs
+3. The circuit reconstructs the leaf: `leaf = Poseidon(denomination, secret, nullifier)`
+4. The circuit outputs a deterministic `nullifierHash = Poseidon(nullifier)` to prevent double-claiming
+5. The circuit accepts public signals: `root`, `denomination`, `nullifierHash`
+6. The delegate sends this proof to a Gas Relayer (or uses an ERC-4337 Paymaster)
+7. The relayer submits the transaction to the `claimReward()` function on the contract
+8. The contract verifies the proof, checks that the `nullifierHash` has not been spent, and transfers the exact denomination to the fresh `recipientAddress`
 
 ### Key Components
 
 **reward.circom Circuit**
 
 Located in `circuits/reward.circom`, this circuit verifies:
-- Knowledge of a `payoutSecret` that exists in the reward tree
+- Knowledge of `secret` and `nullifier` for a reward note that exists in the reward tree
 - Merkle proof of inclusion for the commitment
-- Outputs a `nullifierHash` to prevent double-claiming
-- Accepts public signals: `root`, `nullifierHash` (recipient and relayerFee are contract parameters, not circuit inputs)
+- Leaf reconstruction: `Poseidon(denomination, secret, nullifier)`
+- Outputs a `nullifierHash = Poseidon(nullifier)` to prevent double-claiming
+- Accepts public signals: `root`, `denomination`, `nullifierHash`
+
+**Fixed Denominations**
+
+The system uses fixed denomination notes (stored in wei):
+- `DENOMINATION_0_001_ETH = 1e15` (0.001 ETH)
+- `DENOMINATION_0_01_ETH = 1e16` (0.01 ETH)
+- `DENOMINATION_0_1_ETH = 1e17` (0.1 ETH)
+- `DENOMINATION_1_ETH = 1e18` (1 ETH)
+- `DENOMINATION_10_ETH = 1e19` (10 ETH)
 
 **Contract Functions**
 
-- `provideResponseZK()`: Modified to accept `payoutCommitment` and mint rewards to the reward tree instead of direct transfer
-- `claimReward()`: New function that allows anonymous reward withdrawal using ZK proof verification
+- `provideResponseZK()`: Accepts arrays of `rewardNoteCommitments` and `rewardNoteDenominations`, validates sum equals reward amount, and mints all notes to the reward tree
+- `claimReward()`: Allows anonymous reward withdrawal using ZK proof verification with denomination as public input
+- `decomposeReward()`: Helper function to decompose any reward amount into fixed denominations
 - `verifyRewardProof()`: Helper function to verify reward proofs using the RewardVerifier contract
 
 **State Variables**
 
-- `rewardTreeBalances`: Maps `payoutCommitment` to reward amount
+- `allowedDenominations`: Array of allowed denomination values
+- `isAllowedDenomination`: Mapping to check if a denomination is allowed
+- `rewardNoteDenominations`: Maps `noteCommitment` to its denomination for minted, unclaimed notes
 - `spentPayoutNullifiers`: Maps `nullifierHash` to bool to prevent double-claiming
 - `rewardTreeRoots`: Track valid reward tree roots
 - `currentRewardTreeRoot`: Current reward tree root
@@ -97,9 +113,22 @@ Located in `circuits/reward.circom`, this circuit verifies:
 ### Privacy Benefits
 
 1. **Temporal Decoupling**: Submission and withdrawal happen at different times
-2. **Address Decoupling**: Rewards go to a fresh address unrelated to the submission
-3. **Relayer Support**: Both submission and withdrawal can be done via relayers
-4. **Anonymity Set**: As more rewards are minted, the anonymity set grows, making it harder to link specific withdrawals to specific submissions
+2. **Address Decoupling**: Each note can be claimed to a different fresh address
+3. **Denomination Privacy**: Splitting rewards into multiple notes hides the exact reward amount
+4. **Relayer Support**: Both submission and withdrawal can be done via relayers
+5. **Anonymity Set**: Single global reward tree preserves large anonymity set regardless of note count
+6. **Independent Claims**: Each note can be claimed independently at different times
+
+### Privacy-Cost Tradeoff
+
+The system allows tuning the privacy-cost tradeoff by choosing how many notes to split a reward into:
+
+- **1 note**: Lowest gas cost, exact denomination revealed
+- **3-5 notes**: Moderate gas cost, denomination hidden among possibilities
+- **9+ notes**: Higher gas cost, strong denomination privacy
+- **20+ notes**: Highest gas cost, very strong denomination privacy
+
+Gas benchmarks show approximately linear scaling with note count during minting, while claiming cost remains constant per note. This allows academic measurement of the privacy-cost tradeoff.
 
 ### Deployment Steps
 

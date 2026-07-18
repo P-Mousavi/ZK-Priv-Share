@@ -9,8 +9,9 @@ This project implements a proof-of-concept of the Priv-share protocol, enhanced 
 - **Anonymous Identity Management**: Users can register identity commitments without revealing their actual identity
 - **Dual-Tree Structure**: Decoupled merkle trees for identity and reward management:
   - **Identity Merkle Tree**: Stores user identity commitments for anonymous access requests
-  - **Reward Merkle Tree**: Manages reward claims and slashing mechanisms
-- **ZK Proof Verification**: Groth16 proofs for anonymous operations (access requests, disputes, voting)
+  - **Reward Merkle Tree**: Single global tree for note-based reward claims with fixed denominations
+- **Note-Based Reward System**: Rewards are decomposed into fixed-denomination notes (0.001, 0.01, 0.1, 1, 10 ETH) for denomination privacy
+- **ZK Proof Verification**: Groth16 proofs for anonymous operations (access requests, disputes, voting, reward claiming)
 - **Poseidon Hash Integration**: Uses Poseidon hash for merkle tree computation to ensure compatibility with circom circuits
 
 ## Tech Stack

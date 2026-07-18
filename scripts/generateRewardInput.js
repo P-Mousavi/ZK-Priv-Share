@@ -105,16 +105,20 @@ async function generateRewardInput() {
     
     const poseidon = await buildPoseidon();
     
-    const payoutSecret = BigInt("1234567890123456789012345678901234567890123456789012345678901234");
+    const secret = BigInt("1234567890123456789012345678901234567890123456789012345678901234");
+    const nullifier = BigInt("2234567890123456789012345678901234567890123456789012345678901234");
+    const denomination = BigInt("1000000000000000000");
     
     console.log("Generating Claim Circuit Input...");
     console.log(`Tree Depth: ${TREE_DEPTH}`);
-    console.log(`Payout Secret: ${payoutSecret.toString()}`);
+    console.log(`Secret: ${secret.toString()}`);
+    console.log(`Nullifier: ${nullifier.toString()}`);
+    console.log(`Denomination: ${denomination.toString()}`);
     
-    // Step 1: Compute commitment (Poseidon(payoutSecret))
-    const commitmentResult = poseidon([payoutSecret]);
+    // Step 1: Compute commitment (Poseidon(denomination, secret, nullifier))
+    const commitmentResult = poseidon([denomination, secret, nullifier]);
     const commitment = BigInt(poseidon.F.toString(commitmentResult));
-    console.log(`\nCommitment (Poseidon(payoutSecret)): ${commitment.toString()}`);
+    console.log(`\nCommitment (Poseidon(denomination, secret, nullifier)): ${commitment.toString()}`);
     
     // Step 2: Create Merkle Tree
     const tree = new PoseidonMerkleTree(TREE_DEPTH, poseidon);
@@ -142,25 +146,21 @@ async function generateRewardInput() {
     console.log(`Path Elements: [${pathElements.join(", ")}]`);
     console.log(`Path Indices: [${pathIndices.join(", ")}]`);
     
-    // Step 5: Compute nullifier hash (Poseidon(payoutSecret))
-    const nullifierHashResult = poseidon([payoutSecret]);
+    // Step 5: Compute nullifier hash (Poseidon(nullifier))
+    const nullifierHashResult = poseidon([nullifier]);
     const nullifierHash = BigInt(poseidon.F.toString(nullifierHashResult));
     
     console.log(`\nNullifier Hash: ${nullifierHash.toString()}`);
     
-    // Step 6: Set recipient and relayer fee
-    const recipient = BigInt("1234567890123456789012345678901234567890123456789012345678901234");
-    const relayerFee = BigInt("1000000000000000000"); // 1 ETH
-    
-    // Step 7: Create input.json for the claim circuit
+    // Step 6: Create input.json for the claim circuit
     const input = {
-        payoutSecret: payoutSecret.toString(),
+        secret: secret.toString(),
+        nullifier: nullifier.toString(),
         pathElements: pathElements,
         pathIndices: pathIndices,
         root: root,
-        nullifierHash: nullifierHash.toString(),
-        recipient: recipient.toString(),
-        relayerFee: relayerFee.toString()
+        denomination: denomination.toString(),
+        nullifierHash: nullifierHash.toString()
     };
     
     const inputPath = path.join(__dirname, "..", "circuits", "reward_input.json");

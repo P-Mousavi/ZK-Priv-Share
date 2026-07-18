@@ -35,7 +35,7 @@ interface IRewardVerifier {
         uint[2] calldata _pA,
         uint[2][2] calldata _pB,
         uint[2] calldata _pC,
-        uint[2] memory _pubSignals
+        uint[3] memory _pubSignals
     ) external view returns (bool);
 }
 
@@ -133,9 +133,18 @@ contract ZKDataContract {
     mapping(uint256 => bool) public zkGroupManagerCommitments;
 
     // --- Reward Tree (Decoupled Shielded Payouts) ---
-    // Maps payoutCommitment -> reward amount for pending rewards
-    mapping(uint256 => uint256) public rewardTreeBalances;
-    // Maps payoutNullifier -> bool to prevent double-claiming
+    // Fixed denominations are represented in wei. Reward notes use:
+    // leaf = Poseidon(denomination, secret, nullifier).
+    uint256 public constant DENOMINATION_0_001_ETH = 1e15;
+    uint256 public constant DENOMINATION_0_01_ETH = 1e16;
+    uint256 public constant DENOMINATION_0_1_ETH = 1e17;
+    uint256 public constant DENOMINATION_1_ETH = 1e18;
+    uint256 public constant DENOMINATION_10_ETH = 1e19;
+    uint256[] public allowedDenominations;
+    mapping(uint256 => bool) public isAllowedDenomination;
+    // Maps reward note commitment -> denomination for minted, unclaimed notes.
+    mapping(uint256 => uint256) public rewardNoteDenominations;
+    // Maps payoutNullifier -> bool to prevent double-claiming.
     mapping(uint256 => bool) public spentPayoutNullifiers;
     // Track valid reward tree roots
     mapping(uint256 => bool) public rewardTreeRoots;
@@ -177,13 +186,12 @@ contract ZKDataContract {
             d.isOpen = false;
             if (d.isZKDispute) {
                 // ZK dispute: transfer delegate's deposit to accuser's payout commitment
+                // TODO: require accuser-provided denomination notes for this transfer as well.
                 uint256 delegateDeposit = zkIdentity.deposits(d.identityCommitment);
-                if (delegateDeposit > 0) {
-                    rewardTreeBalances[d.accuserPayoutCommitment] += delegateDeposit;
-                }
-                // Zero out the delegate's reward in the reward tree
-                if (rewardTreeBalances[d.payoutCommitment] > 0) {
-                    rewardTreeBalances[d.payoutCommitment] = 0;
+                delegateDeposit;
+                // Cancel the delegate's pending reward note if it has not been claimed.
+                if (rewardNoteDenominations[d.payoutCommitment] > 0) {
+                    rewardNoteDenominations[d.payoutCommitment] = 0;
                 }
                 // Remove delegate from identity tree by zeroing deposit
                 zkIdentity.slashAndReward(d.defendant, d.payoutCommitment, d.identityCommitment);
@@ -219,8 +227,8 @@ contract ZKDataContract {
     event ZKVotedOnDispute(uint256 indexed disputeId, bytes32 nullifierHash, bool isGuilty);
     event DisputeSettled(uint256 indexed disputeId, bool wasGuilty);
     event ZKGroupManagerRegistered(uint256 indexed commitment);
-    event RewardMinted(uint256 indexed payoutCommitment, uint256 amount);
-    event RewardClaimed(uint256 indexed nullifierHash, address indexed recipient, uint256 amount);
+    event RewardNoteMinted(uint256 indexed noteCommitment, uint256 denomination);
+    event RewardClaimed(uint256 indexed nullifierHash, address indexed recipient, uint256 denomination, uint256 relayerFee);
 
     constructor(
         address _zkIdentity,
@@ -242,6 +250,50 @@ contract ZKDataContract {
             isGroupManager[manager] = true;
             groupManagers.push(manager);
         }
+
+        _addAllowedDenomination(DENOMINATION_10_ETH);
+        _addAllowedDenomination(DENOMINATION_1_ETH);
+        _addAllowedDenomination(DENOMINATION_0_1_ETH);
+        _addAllowedDenomination(DENOMINATION_0_01_ETH);
+        _addAllowedDenomination(DENOMINATION_0_001_ETH);
+    }
+
+    function _addAllowedDenomination(uint256 _denomination) internal {
+        isAllowedDenomination[_denomination] = true;
+        allowedDenominations.push(_denomination);
+    }
+
+    function getAllowedDenominations() external view returns (uint256[] memory) {
+        return allowedDenominations;
+    }
+
+    function decomposeReward(uint256 _amount) public view returns (uint256[] memory) {
+        uint256 remaining = _amount;
+        uint256 count;
+
+        for (uint256 i = 0; i < allowedDenominations.length; i++) {
+            uint256 denomination = allowedDenominations[i];
+            uint256 notes = remaining / denomination;
+            count += notes;
+            remaining -= notes * denomination;
+        }
+        require(remaining == 0, "Reward amount not decomposable");
+
+        uint256[] memory denominations = new uint256[](count);
+        uint256 index;
+        remaining = _amount;
+
+        for (uint256 i = 0; i < allowedDenominations.length; i++) {
+            uint256 denomination = allowedDenominations[i];
+            uint256 notes = remaining / denomination;
+            for (uint256 j = 0; j < notes; j++) {
+                denominations[index] = denomination;
+                index++;
+            }
+            remaining -= notes * denomination;
+        }
+
+        return denominations;
     }
 
 
@@ -313,12 +365,14 @@ contract ZKDataContract {
      * MUST prove they own the identity at 'allocatedLeafIndex'.
      * @param input = [root, actionId, nullifierHash]
      * actionId must be the requestId to bind the proof to this task.
-     * @param _payoutCommitment Poseidon hash of the delegate's payoutSecret for reward claiming
+     * @param _rewardNoteCommitments Commitments generated off-chain as Poseidon(denomination, secret, nullifier)
+     * @param _rewardNoteDenominations Fixed denominations assigned to each reward note
      */
     function provideResponseZK(
         uint256 _requestId,
         string calldata _ipfsCid,
-        uint256 _payoutCommitment,
+        uint256[] calldata _rewardNoteCommitments,
+        uint256[] calldata _rewardNoteDenominations,
         uint256[2] calldata a,
         uint256[2][2] calldata b,
         uint256[2] calldata c,
@@ -341,17 +395,38 @@ contract ZKDataContract {
         req.responseIpfsCid = _ipfsCid;
         req.fulfilled = true;
         
-        // 5. Mint Reward to Reward Tree (Decoupled Payout)
-        // Instead of direct transfer, mint the reward to the reward tree
-        // The delegate can later claim it anonymously using claimReward()
-        uint256 rewardAmount = address(this).balance; // Simplified: use entire balance as reward
+        // 5. Mint fixed-denomination reward notes to the Reward Tree (Decoupled Payout)
+        CtiShare storage cti = ctiShares[req.ctiId];
+        uint256 rewardAmount = cti.royaltyFee + cti.computationCost; // Delegate's share
         require(rewardAmount > 0, "No reward available");
-        require(rewardTreeBalances[_payoutCommitment] == 0, "Payout commitment already used");
-        
-        rewardTreeBalances[_payoutCommitment] = rewardAmount;
-        emit RewardMinted(_payoutCommitment, rewardAmount);
+        _mintRewardNotes(_rewardNoteCommitments, _rewardNoteDenominations, rewardAmount);
 
         emit ZKResponseProvided(_requestId);
+    }
+
+    function _mintRewardNotes(
+        uint256[] calldata _noteCommitments,
+        uint256[] calldata _denominations,
+        uint256 _expectedAmount
+    ) internal {
+        require(_noteCommitments.length == _denominations.length, "Reward note arrays mismatch");
+        require(_noteCommitments.length > 0, "No reward notes");
+
+        uint256 total;
+        for (uint256 i = 0; i < _noteCommitments.length; i++) {
+            uint256 noteCommitment = _noteCommitments[i];
+            uint256 denomination = _denominations[i];
+
+            require(noteCommitment != 0, "Invalid reward note");
+            require(isAllowedDenomination[denomination], "Unsupported denomination");
+            require(rewardNoteDenominations[noteCommitment] == 0, "Reward note already minted");
+
+            rewardNoteDenominations[noteCommitment] = denomination;
+            total += denomination;
+            emit RewardNoteMinted(noteCommitment, denomination);
+        }
+
+        require(total == _expectedAmount, "Reward note sum mismatch");
     }
 
     // --- NON-ZK REQUEST-RESPONSE PHASE ---
@@ -685,45 +760,57 @@ contract ZKDataContract {
 
     /**
      * @dev Claim a reward anonymously using a ZK proof.
-     * The delegate proves knowledge of a payoutSecret that exists in the reward tree.
+     * The delegate proves knowledge of a reward note that exists in the reward tree.
      * The reward is sent to a fresh recipient address, breaking the link to the original submission.
      * @param _pA First proof parameter
      * @param _pB Second proof parameter
      * @param _pC Third proof parameter
      * @param _root Merkle root of the reward tree at the time of minting
-     * @param _nullifierHash Hash of the payoutSecret to prevent double-claiming
+     * @param _denomination Fixed note denomination paid by this claim
+     * @param _nullifierHash Hash of the reward note nullifier to prevent double-claiming
      * @param _recipient Fresh address to receive the reward
      * @param _relayerFee Fee to pay the relayer for gas costs
-     * @param _payoutCommitment The commitment to look up the reward balance
      */
     function claimReward(
         uint[2] calldata _pA,
         uint[2][2] calldata _pB,
         uint[2] calldata _pC,
         uint256 _root,
+        uint256 _denomination,
         uint256 _nullifierHash,
         address _recipient,
-        uint256 _relayerFee,
-        uint256 _payoutCommitment
+        uint256 _relayerFee
     ) external {
+        _claimReward(_pA, _pB, _pC, _root, _denomination, _nullifierHash, _recipient, _relayerFee);
+    }
+
+    function _claimReward(
+        uint[2] calldata _pA,
+        uint[2][2] calldata _pB,
+        uint[2] calldata _pC,
+        uint256 _root,
+        uint256 _denomination,
+        uint256 _nullifierHash,
+        address _recipient,
+        uint256 _relayerFee
+    ) internal {
         // 1. Check that the nullifier hasn't been spent (prevent double-claiming)
         require(!spentPayoutNullifiers[_nullifierHash], "Reward already claimed");
+        require(rewardTreeRoots[_root], "Invalid reward root");
+        require(isAllowedDenomination[_denomination], "Unsupported denomination");
+        require(_recipient != address(0), "Invalid recipient");
 
         // 2. Verify the reward proof
-        // Public signals: [root, nullifierHash] (recipient and relayerFee are contract parameters, not circuit inputs)
-        uint[2] memory pubSignals = [_root, _nullifierHash];
+        // Public signals: [root, denomination, nullifierHash]
+        uint[3] memory pubSignals = [_root, _denomination, _nullifierHash];
         require(rewardVerifier.verifyProof(_pA, _pB, _pC, pubSignals), "Invalid reward proof");
 
         // 3. Mark the nullifier as spent
         spentPayoutNullifiers[_nullifierHash] = true;
 
         // 4. Calculate the payout amount
-        // Retrieve the reward amount from the commitment mapping
-        uint256 totalReward = rewardTreeBalances[_payoutCommitment];
-        require(totalReward > 0, "No reward available for this commitment");
-        require(totalReward >= _relayerFee, "Relayer fee exceeds reward amount");
-
-        uint256 payoutAmount = totalReward - _relayerFee;
+        require(_denomination >= _relayerFee, "Relayer fee exceeds reward amount");
+        uint256 payoutAmount = _denomination - _relayerFee;
 
         // 5. Pay the relayer for gas
         if (_relayerFee > 0) {
@@ -735,10 +822,19 @@ contract ZKDataContract {
         (bool sentRecipient, ) = _recipient.call{value: payoutAmount}("");
         require(sentRecipient, "Reward transfer failed");
 
-        // 7. Clean up the reward balance
-        rewardTreeBalances[_payoutCommitment] = 0;
+        emit RewardClaimed(_nullifierHash, _recipient, _denomination, _relayerFee);
+    }
 
-        emit RewardClaimed(_nullifierHash, _recipient, payoutAmount);
+    function verifyRewardProof(
+        uint[2] calldata _pA,
+        uint[2][2] calldata _pB,
+        uint[2] calldata _pC,
+        uint256 _root,
+        uint256 _denomination,
+        uint256 _nullifierHash
+    ) external view returns (bool) {
+        uint[3] memory pubSignals = [_root, _denomination, _nullifierHash];
+        return rewardVerifier.verifyProof(_pA, _pB, _pC, pubSignals);
     }
 
     // --- Test Helper Functions ---
@@ -754,10 +850,24 @@ contract ZKDataContract {
      * @dev Test helper to deposit rewards directly for benchmarking
      * Only callable in testing mode
      */
-    function depositReward(uint256 _payoutCommitment) external payable {
+    function depositReward(
+        uint256[] calldata _noteCommitments,
+        uint256[] calldata _denominations
+    ) external payable {
         require(testingMode, "Not in testing mode");
         require(msg.value > 0, "Must send ETH");
-        rewardTreeBalances[_payoutCommitment] = msg.value;
+        _mintRewardNotes(_noteCommitments, _denominations, msg.value);
+    }
+
+    function depositReward(uint256 _noteCommitment) external payable {
+        require(testingMode, "Not in testing mode");
+        require(msg.value > 0, "Must send ETH");
+        require(isAllowedDenomination[msg.value], "Unsupported denomination");
+        require(_noteCommitment != 0, "Invalid reward note");
+        require(rewardNoteDenominations[_noteCommitment] == 0, "Reward note already minted");
+
+        rewardNoteDenominations[_noteCommitment] = msg.value;
+        emit RewardNoteMinted(_noteCommitment, msg.value);
     }
     
     /**

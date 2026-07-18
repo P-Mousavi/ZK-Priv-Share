@@ -1,262 +1,94 @@
 const { expect } = require("chai");
-const { buildPoseidon } = require("circomlibjs");
 const { wasm } = require("circom_tester");
 const path = require("path");
-const { poseidonHash, randomFieldElement } = require("../helpers/poseidon");
+const { poseidonHash, poseidonHashArray, randomFieldElement } = require("../helpers/poseidon");
 const { createMerkleTree } = require("../helpers/merkle");
 
 describe("Reward Circuit", () => {
   let circuit: any;
   const LEVELS = 5;
+  const DENOMINATION = 1000000000000000000n;
+
+  async function buildInput(overrides: any = {}) {
+    const secret = overrides.secret ?? randomFieldElement();
+    const nullifier = overrides.nullifier ?? randomFieldElement();
+    const denomination = overrides.denomination ?? DENOMINATION;
+    const commitment = await poseidonHashArray([denomination, secret, nullifier]);
+
+    const leaves = [commitment, randomFieldElement(), randomFieldElement(), randomFieldElement()];
+    const { root, proofs } = await createMerkleTree(leaves, LEVELS);
+    const proof = proofs[0];
+    const nullifierHash = await poseidonHash(nullifier);
+
+    return {
+      secret,
+      nullifier,
+      pathElements: overrides.pathElements ?? proof.pathElements,
+      pathIndices: proof.pathIndices,
+      root: overrides.root ?? root,
+      denomination: overrides.publicDenomination ?? denomination,
+      nullifierHash: overrides.nullifierHash ?? nullifierHash
+    };
+  }
 
   before(async () => {
     const circuitPath = path.join(__dirname, "../../circuits/reward.circom");
-    circuit = await wasm(circuitPath);
+    circuit = await wasm(circuitPath, {
+      output: path.join(__dirname, "../../circuits/build/reward_test"),
+      recompile: false
+    });
   });
 
-  describe("ClaimReward", () => {
-    it("should generate valid proof for reward claim", async () => {
-      // Generate random payout secret
-      const payoutSecret = randomFieldElement();
-      
-      // Compute commitment
-      const commitment = await poseidonHash(payoutSecret);
-      
-      // Create a Merkle tree with the commitment
-      const leaves = [commitment, randomFieldElement(), randomFieldElement(), randomFieldElement()];
-      const { root, proofs } = await createMerkleTree(leaves, LEVELS);
-      
-      const proof = proofs[0];
-      
-      // Compute nullifier hash
-      const nullifierHash = await poseidonHash(payoutSecret);
-      
-      // Public inputs
-      const recipient = BigInt("0x" + "1234".repeat(10)); // Random address
-      const relayerFee = BigInt("100000000000000000"); // 0.1 ether
-      
-      // Circuit input
-      const input = {
-        payoutSecret,
-        pathElements: proof.pathElements,
-        pathIndices: proof.pathIndices,
-        root,
-        nullifierHash,
-        recipient,
-        relayerFee
-      };
-      
-      // Calculate witness
-      const witness = await circuit.calculateWitness(input);
-      
-      // Check that the witness was computed successfully
-      expect(witness).to.not.be.undefined;
-    });
+  it("should generate a valid witness for a fixed-denomination reward note", async () => {
+    const input = await buildInput();
+    const witness = await circuit.calculateWitness(input);
+    expect(witness).to.not.be.undefined;
+  });
 
-    it("should fail with invalid Merkle root", async () => {
-      const payoutSecret = randomFieldElement();
-      const commitment = await poseidonHash(payoutSecret);
-      
-      const leaves = [commitment, randomFieldElement(), randomFieldElement(), randomFieldElement()];
-      const { proofs } = await createMerkleTree(leaves, LEVELS);
-      
-      const proof = proofs[0];
-      const nullifierHash = await poseidonHash(payoutSecret);
-      const invalidRoot = randomFieldElement();
-      const recipient = BigInt("0x" + "1234".repeat(10));
-      const relayerFee = BigInt("100000000000000000");
-      
-      const input = {
-        payoutSecret,
-        pathElements: proof.pathElements,
-        pathIndices: proof.pathIndices,
-        root: invalidRoot,
-        nullifierHash,
-        recipient,
-        relayerFee
-      };
-      
-      try {
-        await circuit.calculateWitness(input);
-        expect.fail("Should have thrown an error");
-      } catch (error: any) {
-        expect(error.message).to.include("Assert fail");
-      }
-    });
+  it("should fail with invalid Merkle root", async () => {
+    const input = await buildInput({ root: randomFieldElement() });
 
-    it("should fail with incorrect nullifier hash", async () => {
-      const payoutSecret = randomFieldElement();
-      const commitment = await poseidonHash(payoutSecret);
-      
-      const leaves = [commitment, randomFieldElement(), randomFieldElement(), randomFieldElement()];
-      const { root, proofs } = await createMerkleTree(leaves, LEVELS);
-      
-      const proof = proofs[0];
-      const invalidNullifierHash = randomFieldElement();
-      const recipient = BigInt("0x" + "1234".repeat(10));
-      const relayerFee = BigInt("100000000000000000");
-      
-      const input = {
-        payoutSecret,
-        pathElements: proof.pathElements,
-        pathIndices: proof.pathIndices,
-        root,
-        nullifierHash: invalidNullifierHash,
-        recipient,
-        relayerFee
-      };
-      
-      try {
-        await circuit.calculateWitness(input);
-        expect.fail("Should have thrown an error");
-      } catch (error: any) {
-        expect(error.message).to.include("Assert fail");
-      }
-    });
+    try {
+      await circuit.calculateWitness(input);
+      expect.fail("Should have thrown an error");
+    } catch (error: any) {
+      expect(error.message).to.include("Assert Failed");
+    }
+  });
 
-    it("should fail with incorrect path elements", async () => {
-      const payoutSecret = randomFieldElement();
-      const commitment = await poseidonHash(payoutSecret);
-      
-      const leaves = [commitment, randomFieldElement(), randomFieldElement(), randomFieldElement()];
-      const { root, proofs } = await createMerkleTree(leaves, LEVELS);
-      
-      const proof = proofs[0];
-      const nullifierHash = await poseidonHash(payoutSecret);
-      
-      // Corrupt the path elements
-      const invalidPathElements = [...proof.pathElements];
-      invalidPathElements[0] = randomFieldElement();
-      
-      const recipient = BigInt("0x" + "1234".repeat(10));
-      const relayerFee = BigInt("100000000000000000");
-      
-      const input = {
-        payoutSecret,
-        pathElements: invalidPathElements,
-        pathIndices: proof.pathIndices,
-        root,
-        nullifierHash,
-        recipient,
-        relayerFee
-      };
-      
-      try {
-        await circuit.calculateWitness(input);
-        expect.fail("Should have thrown an error");
-      } catch (error: any) {
-        expect(error.message).to.include("Assert fail");
-      }
-    });
+  it("should fail with incorrect nullifier hash", async () => {
+    const input = await buildInput({ nullifierHash: randomFieldElement() });
 
-    it("should handle different recipient addresses", async () => {
-      const payoutSecret = randomFieldElement();
-      const commitment = await poseidonHash(payoutSecret);
-      
-      const leaves = [commitment, randomFieldElement(), randomFieldElement(), randomFieldElement()];
-      const { root, proofs } = await createMerkleTree(leaves, LEVELS);
-      
-      const proof = proofs[0];
-      const nullifierHash = await poseidonHash(payoutSecret);
-      
-      const recipient1 = BigInt("0x" + "1111".repeat(10));
-      const recipient2 = BigInt("0x" + "2222".repeat(10));
-      const relayerFee = BigInt("100000000000000000");
-      
-      const input1 = {
-        payoutSecret,
-        pathElements: proof.pathElements,
-        pathIndices: proof.pathIndices,
-        root,
-        nullifierHash,
-        recipient: recipient1,
-        relayerFee
-      };
-      
-      const input2 = {
-        payoutSecret,
-        pathElements: proof.pathElements,
-        pathIndices: proof.pathIndices,
-        root,
-        nullifierHash,
-        recipient: recipient2,
-        relayerFee
-      };
-      
-      const witness1 = await circuit.calculateWitness(input1);
-      const witness2 = await circuit.calculateWitness(input2);
-      
-      expect(witness1).to.not.be.undefined;
-      expect(witness2).to.not.be.undefined;
-    });
+    try {
+      await circuit.calculateWitness(input);
+      expect.fail("Should have thrown an error");
+    } catch (error: any) {
+      expect(error.message).to.include("Assert Failed");
+    }
+  });
 
-    it("should handle different relayer fees", async () => {
-      const payoutSecret = randomFieldElement();
-      const commitment = await poseidonHash(payoutSecret);
-      
-      const leaves = [commitment, randomFieldElement(), randomFieldElement(), randomFieldElement()];
-      const { root, proofs } = await createMerkleTree(leaves, LEVELS);
-      
-      const proof = proofs[0];
-      const nullifierHash = await poseidonHash(payoutSecret);
-      const recipient = BigInt("0x" + "1234".repeat(10));
-      
-      const relayerFee1 = BigInt("0");
-      const relayerFee2 = BigInt("100000000000000000");
-      
-      const input1 = {
-        payoutSecret,
-        pathElements: proof.pathElements,
-        pathIndices: proof.pathIndices,
-        root,
-        nullifierHash,
-        recipient,
-        relayerFee: relayerFee1
-      };
-      
-      const input2 = {
-        payoutSecret,
-        pathElements: proof.pathElements,
-        pathIndices: proof.pathIndices,
-        root,
-        nullifierHash,
-        recipient,
-        relayerFee: relayerFee2
-      };
-      
-      const witness1 = await circuit.calculateWitness(input1);
-      const witness2 = await circuit.calculateWitness(input2);
-      
-      expect(witness1).to.not.be.undefined;
-      expect(witness2).to.not.be.undefined;
-    });
+  it("should fail when the public denomination does not match the note leaf", async () => {
+    const input = await buildInput({ publicDenomination: 100000000000000000n });
 
-    it("should handle maximum tree depth", async () => {
-      const payoutSecret = randomFieldElement();
-      const commitment = await poseidonHash(payoutSecret);
-      
-      // Create tree with many leaves
-      const leaves = Array(32).fill(0n).map(() => randomFieldElement());
-      leaves[0] = commitment;
-      
-      const { root, proofs } = await createMerkleTree(leaves, LEVELS);
-      const proof = proofs[0];
-      const nullifierHash = await poseidonHash(payoutSecret);
-      const recipient = BigInt("0x" + "1234".repeat(10));
-      const relayerFee = BigInt("100000000000000000");
-      
-      const input = {
-        payoutSecret,
-        pathElements: proof.pathElements,
-        pathIndices: proof.pathIndices,
-        root,
-        nullifierHash,
-        recipient,
-        relayerFee
-      };
-      
-      const witness = await circuit.calculateWitness(input);
-      expect(witness).to.not.be.undefined;
-    });
+    try {
+      await circuit.calculateWitness(input);
+      expect.fail("Should have thrown an error");
+    } catch (error: any) {
+      expect(error.message).to.include("Assert Failed");
+    }
+  });
+
+  it("should fail with incorrect path elements", async () => {
+    const validInput = await buildInput();
+    const invalidPathElements = [...validInput.pathElements];
+    invalidPathElements[0] = randomFieldElement();
+    const input = { ...validInput, pathElements: invalidPathElements };
+
+    try {
+      await circuit.calculateWitness(input);
+      expect.fail("Should have thrown an error");
+    } catch (error: any) {
+      expect(error.message).to.include("Assert Failed");
+    }
   });
 });

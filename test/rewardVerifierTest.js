@@ -2,7 +2,7 @@ const { expect } = require("chai");
 const { ethers } = require("hardhat");
 const { groth16 } = require("snarkjs");
 const path = require("path");
-const { poseidonHash, randomFieldElement } = require("./helpers/poseidon");
+const { poseidonHash, poseidonHashArray, randomFieldElement } = require("./helpers/poseidon");
 const { createMerkleTree } = require("./helpers/merkle");
 
 describe("Reward Verifier Direct Test", function () {
@@ -18,11 +18,13 @@ describe("Reward Verifier Direct Test", function () {
   });
 
   it("should verify a valid reward proof directly", async function () {
-    // Generate random payout secret
-    const payoutSecret = randomFieldElement();
+    // Generate random reward note secret/nullifier
+    const secret = randomFieldElement();
+    const nullifier = randomFieldElement();
+    const denomination = ethers.parseEther("1");
     
     // Compute commitment
-    const commitment = await poseidonHash(payoutSecret);
+    const commitment = await poseidonHashArray([denomination, secret, nullifier]);
     
     // Create a Merkle tree with the commitment
     const leaves = [commitment, randomFieldElement(), randomFieldElement(), randomFieldElement()];
@@ -31,14 +33,16 @@ describe("Reward Verifier Direct Test", function () {
     const proof = proofs[0];
     
     // Compute nullifier hash
-    const nullifierHash = await poseidonHash(payoutSecret);
+    const nullifierHash = await poseidonHash(nullifier);
     
     // Circuit input (recipient and relayerFee are no longer part of the circuit)
     const input = {
-      payoutSecret: payoutSecret.toString(),
+      secret: secret.toString(),
+      nullifier: nullifier.toString(),
       pathElements: proof.pathElements.map(e => e.toString()),
       pathIndices: proof.pathIndices,
       root: root.toString(),
+      denomination: denomination.toString(),
       nullifierHash: nullifierHash.toString()
     };
 
@@ -49,7 +53,7 @@ describe("Reward Verifier Direct Test", function () {
     const { proof: snarkProof, publicSignals } = await groth16.fullProve(input, wasmPath, zkeyPath);
 
     console.log("Public signals from proof:", publicSignals);
-    console.log("Expected:", [root.toString(), nullifierHash.toString()]);
+    console.log("Expected:", [root.toString(), denomination.toString(), nullifierHash.toString()]);
     const fieldSize = BigInt("21888242871839275222246405745257275088548364400416034343698204186575808495617");
     console.log("Field size:", fieldSize.toString());
     console.log("Root in field:", BigInt(publicSignals[0]) < fieldSize);
@@ -65,7 +69,8 @@ describe("Reward Verifier Direct Test", function () {
 
     const pubSignals = [
       BigInt(publicSignals[0]),
-      BigInt(publicSignals[1])
+      BigInt(publicSignals[1]),
+      BigInt(publicSignals[2])
     ];
 
     // Verify using snarkjs directly

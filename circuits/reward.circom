@@ -5,20 +5,24 @@ include "./lib/merkleTree.circom";
 
 template ClaimReward(levels) {
     // 1. Private Inputs (The secrets)
-    signal input payoutSecret;
+    signal input secret;
+    signal input nullifier;
     signal input pathElements[levels];
     signal input pathIndices[levels];
 
     // 2. Public Inputs (Context)
     signal input root;           // Merkle Root of reward tree
-    signal input nullifierHash;  // Hash of payoutSecret to prevent double-claiming
+    signal input denomination;   // Fixed reward denomination in wei
+    signal input nullifierHash;  // Hash of nullifier to prevent double-claiming
 
     // --- Logic ---
 
     // A. Reconstruct the Payout Commitment
-    // The commitment is Poseidon(payoutSecret)
-    component commHasher = Poseidon(1);
-    commHasher.inputs[0] <== payoutSecret;
+    // The commitment is Poseidon(denomination, secret, nullifier)
+    component commHasher = Poseidon(3);
+    commHasher.inputs[0] <== denomination;
+    commHasher.inputs[1] <== secret;
+    commHasher.inputs[2] <== nullifier;
 
     // B. Verify Merkle Proof (Commitment exists in the reward tree)
     component treeVerifier = MerkleTreeInclusionProof(levels);
@@ -30,12 +34,11 @@ template ClaimReward(levels) {
     treeVerifier.root === root;
 
     // C. Generate Nullifier Hash (To prevent double-claiming)
-    // The nullifier is Poseidon(payoutSecret)
     component nullifierHasher = Poseidon(1);
-    nullifierHasher.inputs[0] <== payoutSecret;
+    nullifierHasher.inputs[0] <== nullifier;
 
     // The calculated nullifier must match the public nullifier provided
     nullifierHasher.out === nullifierHash;
 }
 
-component main {public [root, nullifierHash]} = ClaimReward(5);
+component main {public [root, denomination, nullifierHash]} = ClaimReward(5);
