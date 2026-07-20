@@ -255,10 +255,12 @@ class ProvingBenchmark {
       const startTime = Date.now();
       
       // Generate input using valid merkle proof data template
-      const payoutSecret = BigInt("1234567890123456789012345678901234567890123456789012345678901234");
+      const secret = BigInt("1234567890123456789012345678901234567890123456789012345678901234");
+      const nullifier = BigInt("2234567890123456789012345678901234567890123456789012345678901234");
       
       const input = {
-        payoutSecret: payoutSecret.toString(),
+        secret: secret.toString(),
+        nullifier: nullifier.toString(),
         pathElements: [
           "4718284119804185511257508371982628095258483864365234338531443234707945892862",
           "4409480543597120787050312410505004647240495531953077200613311560587391041909",
@@ -267,8 +269,9 @@ class ProvingBenchmark {
           "3607627140608796879659380071776844901612302623152076817094415224584923813162"
         ],
         pathIndices: ["0", "0", "0", "0", "0"],
-        root: "4065890528296671450970044567782194027850077268679283611501865288319117844914",
-        nullifierHash: "311708930269616490637035120842272435379819186245845691153625254083566795309"
+        root: "19366463016032525794279494399300591890034640904600519725853456680270932941555",
+        denomination: "1000000000000000000",
+        nullifierHash: "18073575285415553535716290000361809042313201264615983437099641655929799946524"
       };
       
       // Generate proof
@@ -340,18 +343,15 @@ class ProvingBenchmark {
       
     } catch (error) {
       console.log(`Error verifying proof: ${error.message}`);
-      console.log(`Using estimated values...`);
+      console.log(`Proof verification measurement failed - cannot provide accurate benchmark`);
       
-      const estimatedTime = 50 + Math.random() * 50; // 50-100ms
-      const estimatedMemory = 10 + Math.random() * 10; // 10-20MB
-      
-      this.recordResult('Proof Verification', estimatedTime, estimatedMemory, {
+      this.recordResult('Proof Verification', 0, 0, {
         operation: 'proof verification',
-        estimated: true,
+        failed: true,
         error: error.message
       });
       
-      return { timeMs: estimatedTime, memoryMB: estimatedMemory, estimated: true };
+      return { timeMs: 0, memoryMB: 0, failed: true, error: error.message };
     }
   }
 
@@ -402,20 +402,16 @@ class ProvingBenchmark {
       
     } catch (error) {
       console.log(`Error during circuit compilation: ${error.message}`);
-      console.log(`Circuit compilation requires circom to be installed`);
+      console.log(`Circuit compilation measurement failed - cannot provide accurate benchmark`);
       
-      // Record failure with estimated values
-      const estimatedTime = 120000 + Math.random() * 180000; // 2-5 minutes
-      const estimatedMemory = 500 + Math.random() * 500; // 500-1000MB
-      
-      this.recordResult('Circuit Compilation', estimatedTime, estimatedMemory, {
+      this.recordResult('Circuit Compilation', 0, 0, {
         circuit: circuitName,
         operation: 'circuit compilation',
-        estimated: true,
+        failed: true,
         error: error.message
       });
       
-      return { timeMs: estimatedTime, memoryUsed: estimatedMemory, estimated: true };
+      return { timeMs: 0, memoryUsed: 0, failed: true, error: error.message };
     }
   }
 
@@ -475,18 +471,16 @@ class ProvingBenchmark {
       
     } catch (error) {
       console.log(`Error during witness generation: ${error.message}`);
+      console.log(`Witness generation measurement failed - cannot provide accurate benchmark`);
       
-      const estimatedTime = 100 + Math.random() * 200; // 100-300ms
-      const estimatedMemory = 50 + Math.random() * 50; // 50-100MB
-      
-      this.recordResult('Witness Generation', estimatedTime, estimatedMemory, {
+      this.recordResult('Witness Generation', 0, 0, {
         circuit: circuitName,
         operation: 'witness generation',
-        estimated: true,
+        failed: true,
         error: error.message
       });
       
-      return { timeMs: estimatedTime, memoryUsed: estimatedMemory, estimated: true };
+      return { timeMs: 0, memoryUsed: 0, failed: true, error: error.message };
     }
   }
 
@@ -573,18 +567,16 @@ class ProvingBenchmark {
       
     } catch (error) {
       console.log(`Error during Powers of Tau ceremony: ${error.message}`);
+      console.log(`Powers of Tau ceremony measurement failed - cannot provide accurate benchmark`);
       
-      const estimatedTime = 30000 + Math.random() * 60000; // 30-90 seconds
-      const estimatedMemory = 200 + Math.random() * 300; // 200-500MB
-      
-      this.recordResult('Powers of Tau Ceremony', estimatedTime, estimatedMemory, {
+      this.recordResult('Powers of Tau Ceremony', 0, 0, {
         circuit: circuitName,
         operation: 'ptau ceremony',
-        estimated: true,
+        failed: true,
         error: error.message
       });
       
-      return { timeMs: estimatedTime, memoryUsed: estimatedMemory, estimated: true };
+      return { timeMs: 0, memoryUsed: 0, failed: true, error: error.message };
     }
   }
 
@@ -651,18 +643,16 @@ class ProvingBenchmark {
       
     } catch (error) {
       console.log(`Error during Groth16 setup: ${error.message}`);
+      console.log(`Groth16 setup measurement failed - cannot provide accurate benchmark`);
       
-      const estimatedTime = 10000 + Math.random() * 20000; // 10-30 seconds
-      const estimatedMemory = 300 + Math.random() * 400; // 300-700MB
-      
-      this.recordResult('Groth16 Setup', estimatedTime, estimatedMemory, {
+      this.recordResult('Groth16 Setup', 0, 0, {
         circuit: circuitName,
         operation: 'groth16 setup',
-        estimated: true,
+        failed: true,
         error: error.message
       });
       
-      return { timeMs: estimatedTime, memoryUsed: estimatedMemory, estimated: true };
+      return { timeMs: 0, memoryUsed: 0, failed: true, error: error.message };
     }
   }
 
@@ -742,18 +732,16 @@ class ProvingBenchmark {
       
     } catch (error) {
       console.log(`Error during zkey contribution: ${error.message}`);
+      console.log(`Zkey contribution measurement failed - cannot provide accurate benchmark`);
       
-      const estimatedTime = 5000 + Math.random() * 10000; // 5-15 seconds
-      const estimatedMemory = 200 + Math.random() * 300; // 200-500MB
-      
-      this.recordResult('Zkey Contribution', estimatedTime, estimatedMemory, {
+      this.recordResult('Zkey Contribution', 0, 0, {
         circuit: circuitName,
         operation: 'zkey contribution',
-        estimated: true,
+        failed: true,
         error: error.message
       });
       
-      return { timeMs: estimatedTime, memoryUsed: estimatedMemory, estimated: true };
+      return { timeMs: 0, memoryUsed: 0, failed: true, error: error.message };
     }
   }
 

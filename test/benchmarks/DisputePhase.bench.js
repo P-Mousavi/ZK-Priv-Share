@@ -1,10 +1,22 @@
 const { expect } = require("chai");
 const { ethers } = require("hardhat");
+const fs = require("fs");
+const path = require("path");
+const { setupIdentityProof } = require("../helpers/identityProofHelper");
 
 describe("Dispute & Regulation Phase Gas Benchmarks", function () {
   let identityContract, zkIdentityContract, zkDataContract;
   let owner, producer, consumer, delegate1, delegate2, manager1, manager2, manager3;
   const REGISTRATION_DEPOSIT = ethers.parseEther("1");
+
+  // Store benchmark results
+  const benchmarkResults = {
+    raiseDispute: null,
+    voteOnDispute: null,
+    voteOnDisputeWithSettlement: null,
+    raiseDisputeZK: null,
+    voteOnDisputeZK: null
+  };
 
   beforeEach(async function () {
     [owner, producer, consumer, delegate1, delegate2, manager1, manager2, manager3] = await ethers.getSigners();
@@ -34,6 +46,9 @@ describe("Dispute & Regulation Phase Gas Benchmarks", function () {
     // Update IdentityContract to allow ZKDataContract to call slashAndReward
     await identityContract.setDataContract(await zkDataContract.getAddress());
 
+    // Enable testing mode for ZKIdentity contract to allow setting Merkle roots
+    await zkIdentityContract.setTestingMode(true);
+
     // Register organisations
     const ipfsCid = "QmTest1234567890abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ";
     await identityContract.connect(producer).registerOrganisation(ipfsCid, { value: REGISTRATION_DEPOSIT });
@@ -44,8 +59,10 @@ describe("Dispute & Regulation Phase Gas Benchmarks", function () {
     // Register ZK identities
     const identityCommitment1 = ethers.keccak256(ethers.toUtf8Bytes("identity1"));
     const identityCommitment2 = ethers.keccak256(ethers.toUtf8Bytes("identity2"));
-    await zkIdentityContract.connect(delegate1).registerIdentity(identityCommitment1, { value: REGISTRATION_DEPOSIT });
-    await zkIdentityContract.connect(delegate2).registerIdentity(identityCommitment2, { value: REGISTRATION_DEPOSIT });
+    const poseidonRoot1 = ethers.keccak256(ethers.toUtf8Bytes("root1"));
+    const poseidonRoot2 = ethers.keccak256(ethers.toUtf8Bytes("root2"));
+    await zkIdentityContract.connect(delegate1).registerIdentity(identityCommitment1, poseidonRoot1, { value: REGISTRATION_DEPOSIT });
+    await zkIdentityContract.connect(delegate2).registerIdentity(identityCommitment2, poseidonRoot2, { value: REGISTRATION_DEPOSIT });
 
     // Register ZK group managers
     await zkDataContract.connect(manager1).registerZKGroupManager(ethers.keccak256(ethers.toUtf8Bytes("manager1")));
@@ -89,18 +106,13 @@ describe("Dispute & Regulation Phase Gas Benchmarks", function () {
       const receipt = await tx.wait();
 
       console.log(`Standard raiseDispute() gas: ${receipt.gasUsed.toString()}`);
+      benchmarkResults.raiseDispute = receipt.gasUsed.toString();
     });
 
     it("Benchmark: Gas overhead of public address tracking", async function () {
       console.log(`\n=== Standard Dispute Tracking Analysis ===`);
-      console.log(`raiseDispute() gas breakdown:`);
-      console.log(`  - Access control check (isRegistered): ~2,000-5,000 gas`);
-      console.log(`  - Party validation: ~3,000-5,000 gas`);
-      console.log(`  - Status validation: ~2,000-3,000 gas`);
-      console.log(`  - Dispute struct creation: ~15,000-25,000 gas`);
-      console.log(`  - Mapping storage (disputes[]): ~20,000-30,000 gas`);
-      console.log(`  - Event emission: ~5,000-10,000 gas`);
-      console.log(`  Total: ~47,000-78,000 gas`);
+      console.log(`raiseDispute() gas breakdown requires actual measurement`);
+      console.log(`Run the benchmark test to obtain accurate gas costs`);
     });
   });
 
@@ -142,6 +154,7 @@ describe("Dispute & Regulation Phase Gas Benchmarks", function () {
       const receipt = await tx.wait();
 
       console.log(`Standard voteOnDispute() gas: ${receipt.gasUsed.toString()}`);
+      benchmarkResults.voteOnDispute = receipt.gasUsed.toString();
     });
 
     it("Benchmark: Multiple votes until threshold reached", async function () {
@@ -188,20 +201,13 @@ describe("Dispute & Regulation Phase Gas Benchmarks", function () {
 
       console.log(`voteOnDispute() gas costs: ${gasCosts.join(", ")}`);
       console.log(`Note: Second vote includes dispute settlement logic`);
+      benchmarkResults.voteOnDisputeWithSettlement = gasCosts[1];
     });
 
     it("Benchmark: Gas overhead of address-based voting", async function () {
       console.log(`\n=== Standard Voting Analysis ===`);
-      console.log(`voteOnDispute() gas breakdown:`);
-      console.log(`  - Access control (onlyManager): ~2,000-3,000 gas`);
-      console.log(`  - Dispute status check: ~2,000-3,000 gas`);
-      console.log(`  - Duplicate vote check (mapping): ~5,000-10,000 gas`);
-      console.log(`  - Vote counting (uint256): ~2,000-3,000 gas`);
-      console.log(`  - Threshold check: ~2,000-5,000 gas`);
-      console.log(`  - Settlement logic (if threshold reached): ~30,000-50,000 gas`);
-      console.log(`  - Event emission: ~5,000-10,000 gas`);
-      console.log(`  Total (without settlement): ~18,000-34,000 gas`);
-      console.log(`  Total (with settlement): ~48,000-84,000 gas`);
+      console.log(`voteOnDispute() gas breakdown requires actual measurement`);
+      console.log(`Run the benchmark test to obtain accurate gas costs`);
     });
   });
 
@@ -230,127 +236,179 @@ describe("Dispute & Regulation Phase Gas Benchmarks", function () {
       const responseIpfsCid = "QmResponse1234567890abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ";
       await zkDataContract.connect(delegate1).provideResponse(1, responseIpfsCid);
 
-      // Mock ZK dispute raising (requires valid proofs for actual execution)
+      // Generate real ZK proof for dispute raising
       const evidenceCid = "QmEvidence1234567890abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ";
       const payoutCommitment = ethers.keccak256(ethers.toUtf8Bytes("payout1"));
       const identityCommitment = ethers.keccak256(ethers.toUtf8Bytes("identity1"));
       const accuserPayoutCommitment = ethers.keccak256(ethers.toUtf8Bytes("accuserPayout1"));
 
-      const a = [0, 0];
-      const b = [[0, 0], [0, 0]];
-      const c = [0, 0];
-      const input = [0, 0, 0];
+      // Calculate expected actionId using solidityPacked (equivalent to abi.encodePacked)
+      // Contract expects: keccak256(abi.encodePacked(_requestId, uint256(_reason), "DISPUTE"))
+      const actionId = ethers.keccak256(ethers.solidityPacked(
+        ["uint256", "uint256", "string"],
+        [1, 1, "DISPUTE"]
+      ));
 
-      console.log(`\n=== ZK Dispute Raising Analysis ===`);
-      console.log(`raiseDisputeZK() requires valid ZK proofs for gas measurement`);
-      console.log(`Estimated gas breakdown:`);
-      console.log(`  - ZK proof verification: ~200,000-300,000 gas`);
-      console.log(`  - Action ID validation: ~2,000-3,000 gas`);
-      console.log(`  - Merkle root validation: ~5,000-10,000 gas`);
-      console.log(`  - Nullifier check (SSTORE): ~20,000 gas`);
-      console.log(`  - Dispute struct creation: ~15,000-25,000 gas`);
-      console.log(`  - Commitment storage: ~20,000-30,000 gas`);
-      console.log(`  - Event emission: ~5,000-10,000 gas`);
-      console.log(`  Total estimated: ~267,000-398,000 gas`);
+      console.log(`Expected actionId: ${actionId}`);
+      console.log(`Expected actionId as number: ${Number(actionId)}`);
+
+      // Generate real ZK proof and set the root in the contract
+      const proofData = await setupIdentityProof(actionId);
+      
+      console.log(`Proof actionId from publicSignals (index 2): ${proofData.pubSignals[2]}`);
+      console.log(`Proof actionId as number: ${Number(proofData.pubSignals[2])}`);
+      console.log(`Proof root from publicSignals (index 0): ${proofData.pubSignals[0]}`);
+      console.log(`Proof root as BigInt: ${proofData.root}`);
+      
+      // Set the Merkle root in the ZKIdentity contract using the pubSignals[0] value
+      // This ensures the root matches what the proof expects
+      const rootFromProof = proofData.pubSignals[0];
+      await zkIdentityContract.setRoot(rootFromProof);
+      
+      // Verify the root was set correctly
+      const isRootSet = await zkIdentityContract.roots(rootFromProof);
+      console.log(`Root set in contract: ${isRootSet}`);
+
+      const tx = await zkDataContract.raiseDisputeZK(
+        1,
+        delegate1.address,
+        1,
+        evidenceCid,
+        payoutCommitment,
+        identityCommitment,
+        accuserPayoutCommitment,
+        proofData.pA,
+        proofData.pB,
+        proofData.pC,
+        proofData.pubSignals
+      );
+      const receipt = await tx.wait();
+
+      console.log(`ZK raiseDisputeZK() gas: ${receipt.gasUsed.toString()}`);
+      benchmarkResults.raiseDisputeZK = receipt.gasUsed.toString();
     });
 
     it("Benchmark: Gas overhead of nullifier-based dispute tracking", async function () {
       console.log(`\n=== Nullifier vs Address Tracking Comparison ===`);
-      console.log(`Standard address tracking:`);
-      console.log(`  - complainant address storage: ~20,000 gas`);
-      console.log(`  - defendant address storage: ~20,000 gas`);
-      console.log(`  - hasVoted mapping per address: ~5,000-10,000 gas per vote`);
-      console.log(`\nZK nullifier tracking:`);
-      console.log(`  - complainant: address(0) (no storage): ~0 gas`);
-      console.log(`  - defendant address storage: ~20,000 gas`);
-      console.log(`  - payoutCommitment storage: ~20,000 gas`);
-      console.log(`  - identityCommitment storage: ~20,000 gas`);
-      console.log(`  - disputeNullifier mapping: ~20,000 gas`);
-      console.log(`  - voteNullifier mapping: ~20,000 gas per vote`);
-      console.log(`\nZK overhead: ~40,000-60,000 gas for nullifier management`);
+      console.log(`Gas breakdown requires actual measurement`);
+      console.log(`Run the benchmark test to obtain accurate gas costs`);
     });
   });
 
   describe("ZK: voteOnDisputeZK()", function () {
     it("Benchmark: ZK voting with proof verification", async function () {
-      console.log(`\n=== ZK Voting Analysis ===`);
-      console.log(`voteOnDisputeZK() requires valid ZK proofs for gas measurement`);
-      console.log(`Estimated gas breakdown:`);
-      console.log(`  - ZK proof verification: ~200,000-300,000 gas`);
-      console.log(`  - Action ID validation: ~2,000-3,000 gas`);
-      console.log(`  - Merkle root validation: ~5,000-10,000 gas`);
-      console.log(`  - Nullifier check (SSTORE): ~20,000 gas`);
-      console.log(`  - Vote counting: ~2,000-3,000 gas`);
-      console.log(`  - Threshold check: ~2,000-5,000 gas`);
-      console.log(`  - Settlement logic (if threshold reached): ~50,000-80,000 gas`);
-      console.log(`  - Event emission: ~5,000-10,000 gas`);
-      console.log(`  Total estimated (without settlement): ~236,000-348,000 gas`);
-      console.log(`  Total estimated (with settlement): ~286,000-428,000 gas`);
+      // Setup complete CTI lifecycle and ZK dispute
+      const accessPolicyIpfsCid = "QmAccessPolicy1234567890abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ";
+      const integrityHashesIpfsCid = "QmIntegrityHashes1234567890abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ";
+      const royaltyFee = ethers.parseEther("0.1");
+      const computationCost = ethers.parseEther("0.2");
+      const initialDelegates = [delegate1.address];
+      const delegateLevels = [1];
+
+      await zkDataContract.connect(producer).shareCti(
+        accessPolicyIpfsCid,
+        integrityHashesIpfsCid,
+        royaltyFee,
+        computationCost,
+        initialDelegates,
+        delegateLevels
+      );
+      await zkDataContract.connect(consumer).initialRequest(1, 1);
+      const credentialsIpfsCid = "QmCredentials1234567890abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ";
+      const totalFee = (royaltyFee * 2n) + computationCost;
+      await zkDataContract.connect(consumer).provideCredentials(1, credentialsIpfsCid, { value: totalFee });
+      const responseIpfsCid = "QmResponse1234567890abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ";
+      await zkDataContract.connect(delegate1).provideResponse(1, responseIpfsCid);
+
+      // Raise ZK dispute with real proof
+      const evidenceCid = "QmEvidence1234567890abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ";
+      const payoutCommitment = ethers.keccak256(ethers.toUtf8Bytes("payout1"));
+      const identityCommitment = ethers.keccak256(ethers.toUtf8Bytes("identity1"));
+      const accuserPayoutCommitment = ethers.keccak256(ethers.toUtf8Bytes("accuserPayout1"));
+
+      const disputeActionId = ethers.keccak256(ethers.solidityPacked(
+        ["uint256", "uint256", "string"],
+        [1, 1, "DISPUTE"]
+      ));
+
+      const disputeProofData = await setupIdentityProof(disputeActionId);
+      
+      // Set the Merkle root in the ZKIdentity contract so the proof validates
+      await zkIdentityContract.setRoot(disputeProofData.root);
+
+      await zkDataContract.raiseDisputeZK(
+        1,
+        delegate1.address,
+        1,
+        evidenceCid,
+        payoutCommitment,
+        identityCommitment,
+        accuserPayoutCommitment,
+        disputeProofData.pA,
+        disputeProofData.pB,
+        disputeProofData.pC,
+        disputeProofData.pubSignals
+      );
+
+      // Vote on ZK dispute with real proof
+      const voteActionId = ethers.keccak256(ethers.solidityPacked(
+        ["uint256", "uint256", "string"],
+        [1, 1, "VOTE"]
+      ));
+
+      const voteProofData = await setupIdentityProof(voteActionId);
+      
+      // Set the Merkle root in the ZKIdentity contract so the proof validates
+      await zkIdentityContract.setRoot(voteProofData.root);
+
+      const tx = await zkDataContract.voteOnDisputeZK(1, true, voteProofData.pA, voteProofData.pB, voteProofData.pC, voteProofData.pubSignals);
+      const receipt = await tx.wait();
+
+      console.log(`ZK voteOnDisputeZK() gas: ${receipt.gasUsed.toString()}`);
+      benchmarkResults.voteOnDisputeZK = receipt.gasUsed.toString();
     });
 
     it("Benchmark: Anonymous slashing efficiency", async function () {
       console.log(`\n=== Anonymous Slashing vs Public Slashing ===`);
-      console.log(`Standard slashing (voteOnDispute with settlement):`);
-      console.log(`  - Identity lookup: ~2,000-3,000 gas`);
-      console.log(`  - Deposit transfer: ~20,000-30,000 gas`);
-      console.log(`  - Registration status update: ~20,000-30,000 gas`);
-      console.log(`  Total: ~42,000-63,000 gas`);
-      console.log(`\nZK anonymous slashing (voteOnDisputeZK with settlement):`);
-      console.log(`  - Commitment lookup: ~5,000-10,000 gas`);
-      console.log(`  - Reward tree balance update: ~20,000-30,000 gas`);
-      console.log(`  - Identity tree removal: ~20,000-30,000 gas`);
-      console.log(`  - Deposit zeroing: ~20,000-30,000 gas`);
-      console.log(`  Total: ~65,000-100,000 gas`);
-      console.log(`\nZK overhead: ~23,000-37,000 gas (55-59% increase)`);
+      console.log(`Gas breakdown requires actual measurement`);
+      console.log(`Run the benchmark test to obtain accurate gas costs`);
     });
   });
 
   describe("Comparative Analysis: Standard vs ZK Dispute Phase", function () {
     it("Direct comparison: Dispute raising", async function () {
       console.log(`\n=== Dispute Raising Comparison ===`);
-      console.log(`Standard raiseDispute(): ~47,000-78,000 gas`);
-      console.log(`ZK raiseDisputeZK(): ~267,000-398,000 gas`);
-      console.log(`ZK overhead: ~220,000-320,000 gas (468-511% increase)`);
-      console.log(`Primary overhead: ZK proof verification (~200,000-300,000 gas)`);
+      console.log(`Run benchmark tests to obtain actual gas costs`);
+      console.log(`Standard raiseDispute() vs ZK raiseDisputeZK()`);
     });
 
     it("Direct comparison: Voting", async function () {
       console.log(`\n=== Voting Comparison ===`);
-      console.log(`Standard voteOnDispute(): ~18,000-34,000 gas (without settlement)`);
-      console.log(`Standard voteOnDispute(): ~48,000-84,000 gas (with settlement)`);
-      console.log(`ZK voteOnDisputeZK(): ~236,000-348,000 gas (without settlement)`);
-      console.log(`ZK voteOnDisputeZK(): ~286,000-428,000 gas (with settlement)`);
-      console.log(`ZK overhead: ~218,000-314,000 gas (1,211-1,261% increase without settlement)`);
-      console.log(`ZK overhead: ~238,000-344,000 gas (496-510% increase with settlement)`);
+      console.log(`Run benchmark tests to obtain actual gas costs`);
+      console.log(`Standard voteOnDispute() vs ZK voteOnDisputeZK()`);
     });
 
     it("Complete dispute resolution comparison", async function () {
       console.log(`\n=== Complete Dispute Resolution Comparison ===`);
-      console.log(`Standard Lifecycle (threshold = 2):`);
-      console.log(`  - raiseDispute(): ~47,000-78,000 gas`);
-      console.log(`  - voteOnDispute() #1: ~18,000-34,000 gas`);
-      console.log(`  - voteOnDispute() #2 (with settlement): ~48,000-84,000 gas`);
-      console.log(`  Total: ~113,000-196,000 gas`);
-      console.log(`\nZK Lifecycle (threshold = 2):`);
-      console.log(`  - raiseDisputeZK(): ~267,000-398,000 gas`);
-      console.log(`  - voteOnDisputeZK() #1: ~236,000-348,000 gas`);
-      console.log(`  - voteOnDisputeZK() #2 (with settlement): ~286,000-428,000 gas`);
-      console.log(`  Total: ~789,000-1,174,000 gas`);
-      console.log(`\nZK overhead: ~676,000-978,000 gas (598-699% increase)`);
+      console.log(`Run benchmark tests to obtain actual gas costs`);
+      console.log(`Standard lifecycle vs ZK lifecycle (threshold = 2)`);
     });
 
     it("Privacy vs efficiency trade-off analysis", async function () {
       console.log(`\n=== Privacy vs Efficiency Trade-off ===`);
-      console.log(`Standard approach:`);
-      console.log(`  - Public identity tracking: Low gas, no privacy`);
-      console.log(`  - Address-based voting: Low gas, no privacy`);
-      console.log(`  - Public slashing: Low gas, no privacy`);
-      console.log(`\nZK approach:`);
-      console.log(`  - Anonymous identity: High gas overhead, full privacy`);
-      console.log(`  - Nullifier-based voting: High gas overhead, full privacy`);
-      console.log(`  - Anonymous slashing: Moderate gas overhead, full privacy`);
-      console.log(`\nConclusion: ZK privacy comes at 500-700% gas cost increase`);
-      console.log(`Privacy premium: ~5-7x gas cost for complete anonymity`);
+      console.log(`Run benchmark tests to obtain actual gas costs for trade-off analysis`);
+      console.log(`Standard approach vs ZK approach`);
     });
+  });
+
+  after(function () {
+    // Save benchmark results to JSON file for report generation
+    const resultsDir = path.join(__dirname, "../../benchmark-results");
+    if (!fs.existsSync(resultsDir)) {
+      fs.mkdirSync(resultsDir, { recursive: true });
+    }
+    const resultsPath = path.join(resultsDir, "dispute-results.json");
+    fs.writeFileSync(resultsPath, JSON.stringify(benchmarkResults, null, 2));
+    console.log(`\nBenchmark results saved to: ${resultsPath}`);
   });
 });

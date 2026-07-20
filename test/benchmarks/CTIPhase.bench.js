@@ -1,10 +1,24 @@
 const { expect } = require("chai");
 const { ethers } = require("hardhat");
+const fs = require("fs");
+const path = require("path");
+const { setupIdentityProof } = require("../helpers/identityProofHelper");
+const { generateRewardNotes, generateRewardTree, generateNoteProof, proofToSolidity } = require("../helpers/rewardProofHelper");
+const { poseidonHash2, randomFieldElement } = require("../helpers/poseidon");
+
 
 describe("CTI Submission & Consumption Phase Gas Benchmarks", function () {
   let identityContract, zkIdentityContract, zkDataContract;
   let owner, producer, consumer, delegate1, delegate2, manager1, manager2;
   const REGISTRATION_DEPOSIT = ethers.parseEther("1");
+  
+  // Store benchmark results
+  const benchmarkResults = {
+    shareCti: null,
+    provideResponse: null,
+    requestAccess: null,
+    provideResponseZK: null
+  };
 
   beforeEach(async function () {
     [owner, producer, consumer, delegate1, delegate2, manager1, manager2] = await ethers.getSigners();
@@ -38,11 +52,11 @@ describe("CTI Submission & Consumption Phase Gas Benchmarks", function () {
     await identityContract.connect(delegate1).registerOrganisation(ipfsCid, { value: REGISTRATION_DEPOSIT });
     await identityContract.connect(delegate2).registerOrganisation(ipfsCid, { value: REGISTRATION_DEPOSIT });
 
-    // Register ZK identities
+    // Register ZK identities (with Poseidon root - using dummy root for setup)
     const identityCommitment1 = ethers.keccak256(ethers.toUtf8Bytes("identity1"));
     const identityCommitment2 = ethers.keccak256(ethers.toUtf8Bytes("identity2"));
-    await zkIdentityContract.connect(delegate1).registerIdentity(identityCommitment1, { value: REGISTRATION_DEPOSIT });
-    await zkIdentityContract.connect(delegate2).registerIdentity(identityCommitment2, { value: REGISTRATION_DEPOSIT });
+    await zkIdentityContract.connect(delegate1).registerIdentity(identityCommitment1, ethers.ZeroHash, { value: REGISTRATION_DEPOSIT });
+    await zkIdentityContract.connect(delegate2).registerIdentity(identityCommitment2, ethers.ZeroHash, { value: REGISTRATION_DEPOSIT });
   });
 
   describe("Standard: shareCti()", function () {
@@ -63,7 +77,7 @@ describe("CTI Submission & Consumption Phase Gas Benchmarks", function () {
         delegateLevels
       );
       const receipt = await tx.wait();
-
+      benchmarkResults.shareCti = receipt.gasUsed.toString();
       console.log(`Standard shareCti() gas: ${receipt.gasUsed.toString()}`);
     });
 
@@ -147,6 +161,7 @@ describe("CTI Submission & Consumption Phase Gas Benchmarks", function () {
       const responseIpfsCid = "QmResponse1234567890abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ";
       const responseTx = await zkDataContract.connect(delegate1).provideResponse(1, responseIpfsCid);
       const responseReceipt = await responseTx.wait();
+      benchmarkResults.provideResponse = responseReceipt.gasUsed.toString();
       console.log(`provideResponse() gas: ${responseReceipt.gasUsed.toString()}`);
 
       const totalCycleGas = requestReceipt.gasUsed + credentialsReceipt.gasUsed + responseReceipt.gasUsed;
@@ -179,6 +194,7 @@ describe("CTI Submission & Consumption Phase Gas Benchmarks", function () {
       const responseIpfsCid = "QmResponse1234567890abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ";
       const tx = await zkDataContract.connect(delegate1).provideResponse(1, responseIpfsCid);
       const receipt = await tx.wait();
+      benchmarkResults.provideResponse = receipt.gasUsed.toString();
 
       console.log(`provideResponse() gas: ${receipt.gasUsed.toString()}`);
       console.log(`Breakdown: State updates + ETH transfers (2) + Event emission`);
@@ -186,7 +202,7 @@ describe("CTI Submission & Consumption Phase Gas Benchmarks", function () {
   });
 
   describe("ZK: provideResponseZK()", function () {
-    it("Benchmark: ZK request-response cycle with proof verification", async function () {
+    it("Benchmark: ZK request-response cycle with valid parameters (real ZK proofs)", async function () {
       const accessPolicyIpfsCid = "QmAccessPolicy1234567890abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ";
       const integrityHashesIpfsCid = "QmIntegrityHashes1234567890abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ";
       const royaltyFee = ethers.parseEther("0.1");
@@ -194,7 +210,10 @@ describe("CTI Submission & Consumption Phase Gas Benchmarks", function () {
       const initialDelegates = [delegate1.address];
       const delegateLevels = [1];
 
-      // Share CTI
+      // Standard ZK approach: All commitments created off-chain using circomlibjs Poseidon
+      // Contract only verifies commitments and proofs, does not create them
+
+      // Share CTI (producer uses standard identity, not ZK)
       await zkDataContract.connect(producer).shareCti(
         accessPolicyIpfsCid,
         integrityHashesIpfsCid,
@@ -208,46 +227,89 @@ describe("CTI Submission & Consumption Phase Gas Benchmarks", function () {
       const totalFee = (royaltyFee * 2n) + computationCost;
       const requestTx = await zkDataContract.connect(consumer).requestAccess(1, { value: totalFee });
       const requestReceipt = await requestTx.wait();
+      benchmarkResults.requestAccess = requestReceipt.gasUsed.toString();
       console.log(`requestAccess() gas: ${requestReceipt.gasUsed.toString()}`);
 
-      // ZK response with mock proof (for benchmarking purposes)
-      const responseIpfsCid = "QmResponse1234567890abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ";
-      const payoutCommitment = ethers.keccak256(ethers.toUtf8Bytes("payout1"));
+      // Get the request ID from the contract
+      const block = await ethers.provider.getBlock("latest");
+      const maxIndex = await zkIdentityContract.nextLeafIndex();
+      const randomLeaf = BigInt(ethers.keccak256(ethers.solidityPacked(["uint256", "address"], [block.timestamp, consumer.address]))) % maxIndex;
+      const requestId = BigInt(ethers.keccak256(ethers.solidityPacked(["uint256", "uint256"], [block.timestamp, randomLeaf])));
       
-      // Mock ZK proof parameters (these would be real proofs in production)
-      const a = [0, 0];
-      const b = [[0, 0], [0, 0]];
-      const c = [0, 0];
-      const input = [0, 0, 0]; // [root, actionId, nullifierHash]
+      console.log(`Using requestId: ${requestId}`);
 
-      // Note: This will fail with "Invalid ZK Proof" but we can still measure the gas up to that point
-      // For accurate benchmarking, you would need valid proofs generated off-chain
-      try {
-        const responseTx = await zkDataContract.provideResponseZK(
-          1, // requestId (would need to be extracted from requestAccess event)
-          responseIpfsCid,
-          [payoutCommitment],
-          [ethers.parseEther("1")],
-          a, b, c, input
-        );
-        const receipt = await responseTx.wait();
-        console.log(`provideResponseZK() gas: ${receipt.gasUsed.toString()}`);
-      } catch (error) {
-        console.log(`provideResponseZK() requires valid ZK proofs for gas measurement`);
-        console.log(`Gas cost includes: ZK proof verification + Merkle root validation + Nullifier check + Reward minting`);
-      }
+      // Generate identity proof using the centralized helper
+      // The helper handles: commitment generation, Merkle tree creation, proof generation, and actionId field modulo
+      const identityProofData = await setupIdentityProof(requestId);
+      
+      // Register the identity commitment in the ZK identity contract
+      // Use the root from the proof's publicSignals[0] since that's what the proof was generated with
+      const proofRoot = identityProofData.pubSignals[0];
+      await zkIdentityContract.connect(delegate1).registerIdentity(
+        identityProofData.identityCommitment,
+        proofRoot,
+        { value: REGISTRATION_DEPOSIT }
+      );
+      
+      // Enable testing mode to set the root in the contract so the proof validates
+      await zkIdentityContract.setTestingMode(true);
+      await zkIdentityContract.setRoot(proofRoot);
+      // Keep testing mode enabled for ZKIdentity during provideResponseZK call
+
+      // Generate reward notes using the centralized helper
+      const rewardAmount = royaltyFee + computationCost; // 0.3 ETH
+      const denominations = await zkDataContract.decomposeReward(rewardAmount);
+      console.log(`Reward amount ${rewardAmount} decomposed into ${denominations.length} notes:`, denominations.map(d => ethers.formatEther(d)));
+      
+      const notes = await generateRewardNotes(denominations);
+      const { root: rewardTreeRoot, noteProofs } = await generateRewardTree(notes);
+      
+      const rewardNoteCommitments = notes.map(n => n.commitment);
+      const rewardNoteDenominations = notes.map(n => n.denomination);
+      
+      // Set the reward tree root in contract (requires testing mode)
+      await zkDataContract.connect(owner).setTestingMode(true);
+      await zkDataContract.connect(owner).setRewardTreeRoot(rewardTreeRoot);
+      
+      // ZK response with real ZK proof parameters from helper
+      const responseIpfsCid = "QmResponse1234567890abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ";
+      
+      // Use the identity proof data from the helper
+      const a = identityProofData.pA;
+      const b = identityProofData.pB;
+      const c = identityProofData.pC;
+      const input = identityProofData.pubSignals; // [root, nullifierHash, actionId] from snarkjs
+      
+      // Call provideResponseZK with testing mode enabled to get gas measurement
+      // Note: This bypasses proof verification, so gas measurement does NOT include proof verification overhead
+      // For accurate academic measurements with real proof verification, the circuit/contract mismatch needs to be fixed
+      const responseTx = await zkDataContract.provideResponseZK(
+        requestId,
+        responseIpfsCid,
+        rewardNoteCommitments,
+        rewardNoteDenominations,
+        a, b, c, input
+      );
+      const receipt = await responseTx.wait();
+      benchmarkResults.provideResponseZK = receipt.gasUsed.toString();
+      console.log(`provideResponseZK() gas (testing mode - bypasses proof verification): ${receipt.gasUsed.toString()}`);
+      
+      await zkDataContract.connect(owner).setTestingMode(false); // Disable after measurement
+      await zkIdentityContract.setTestingMode(false); // Disable ZKIdentity testing mode after measurement
     });
 
     it("Benchmark: ZK proof verification overhead estimation", async function () {
       console.log(`\n=== ZK Proof Verification Overhead Analysis ===`);
-      console.log(`Groth16 proof verification typically costs: ~200,000-300,000 gas`);
-      console.log(`Components:`);
-      console.log(`  - Pairing operations (ecPairing): ~150,000-200,000 gas`);
-      console.log(`  - Field element validation: ~10,000-20,000 gas`);
-      console.log(`  - Merkle root validation: ~5,000-10,000 gas`);
-      console.log(`  - Nullifier check (SSTORE): ~20,000 gas`);
-      console.log(`  - Reward tree minting: ~30,000-50,000 gas`);
-      console.log(`\nTotal estimated overhead: ~215,000-300,000 gas`);
+      console.log(`Groth16 proof verification typically costs ~200-300k gas on Ethereum`);
+      console.log(`Components: Pairing operations (~150-200k gas), field element validation (~20-30k gas),`);
+      console.log(`Merkle root validation (~10-20k gas), nullifier check (~5-10k gas), reward tree minting (~20-30k gas)`);
+      console.log(``);
+      console.log(`Estimated total provideResponseZK() with real proof verification: ~400-500k gas`);
+      console.log(`Current measurement (without proof verification): ${benchmarkResults.provideResponseZK || 'N/A'} gas`);
+      console.log(`Estimated proof verification overhead: ~200-250k gas`);
+      console.log(``);
+      console.log(`Note: Actual proof verification gas depends on circuit complexity and verifier implementation.`);
+      console.log(`For precise measurement, contract needs circomlib-compatible Poseidon implementation.`);
     });
   });
 
@@ -276,33 +338,26 @@ describe("CTI Submission & Consumption Phase Gas Benchmarks", function () {
 
     it("Comparative analysis: Response phase", async function () {
       console.log(`\n=== Response Phase Comparison ===`);
-      console.log(`Standard provideResponse(): ~50,000-80,000 gas`);
-      console.log(`  - State updates: ~20,000-30,000 gas`);
-      console.log(`  - ETH transfers (2): ~20,000-30,000 gas`);
-      console.log(`  - Event emission: ~10,000-20,000 gas`);
-      console.log(`\nZK provideResponseZK(): ~265,000-380,000 gas`);
-      console.log(`  - ZK proof verification: ~200,000-300,000 gas`);
-      console.log(`  - Merkle root validation: ~5,000-10,000 gas`);
-      console.log(`  - Nullifier check: ~20,000 gas`);
-      console.log(`  - Reward tree minting: ~30,000-50,000 gas`);
-      console.log(`  - State updates: ~10,000-20,000 gas`);
-      console.log(`\nZK overhead: ~215,000-300,000 gas (430-500% increase)`);
+      console.log(`Run benchmark tests to obtain actual gas costs`);
+      console.log(`Standard provideResponse() vs ZK provideResponseZK()`);
     });
 
     it("Complete lifecycle comparison", async function () {
       console.log(`\n=== Complete CTI Lifecycle Comparison ===`);
-      console.log(`Standard Lifecycle:`);
-      console.log(`  - shareCti(): ~80,000-120,000 gas`);
-      console.log(`  - initialRequest(): ~30,000-50,000 gas`);
-      console.log(`  - provideCredentials(): ~40,000-60,000 gas`);
-      console.log(`  - provideResponse(): ~50,000-80,000 gas`);
-      console.log(`  Total: ~200,000-310,000 gas`);
-      console.log(`\nZK Lifecycle:`);
-      console.log(`  - shareCti(): ~80,000-120,000 gas (same)`);
-      console.log(`  - requestAccess(): ~35,000-55,000 gas`);
-      console.log(`  - provideResponseZK(): ~265,000-380,000 gas`);
-      console.log(`  Total: ~380,000-555,000 gas`);
-      console.log(`\nZK overhead: ~180,000-245,000 gas (90-79% increase)`);
+      console.log(`Run benchmark tests to obtain actual gas costs`);
+      console.log(`Standard lifecycle vs ZK lifecycle`);
     });
+  });
+
+  after(function () {
+    // Save benchmark results to JSON file
+    const resultsDir = path.join(__dirname, "../../benchmark-results");
+    if (!fs.existsSync(resultsDir)) {
+      fs.mkdirSync(resultsDir, { recursive: true });
+    }
+
+    const resultsPath = path.join(resultsDir, "cti-results.json");
+    fs.writeFileSync(resultsPath, JSON.stringify(benchmarkResults, null, 2));
+    console.log(`\nCTI benchmark results saved to: ${resultsPath}`);
   });
 });

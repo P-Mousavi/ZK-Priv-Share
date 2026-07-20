@@ -60,12 +60,16 @@ async function generateRewardNotes(denominations) {
   for (const denomination of denominations) {
     const secret = randomFieldElement();
     const nullifier = randomFieldElement();
-    const commitment = await poseidonHashArray([denomination, secret, nullifier]);
+    // Ensure denomination is a plain BigInt
+    const denomValue = typeof denomination === 'object' && denomination.value !== undefined 
+      ? BigInt(denomination.value) 
+      : BigInt(denomination);
+    const commitment = await poseidonHashArray([denomValue, secret, nullifier]);
     
     notes.push({
       secret,
       nullifier,
-      denomination,
+      denomination: denomValue,
       commitment: "0x" + commitment.toString(16).padStart(64, "0")
     });
   }

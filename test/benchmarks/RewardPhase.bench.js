@@ -2,6 +2,7 @@ const { expect } = require("chai");
 const { ethers } = require("hardhat");
 const { groth16 } = require("snarkjs");
 const path = require("path");
+const fs = require("fs");
 const { poseidonHash, poseidonHash2, randomFieldElement } = require("../helpers/poseidon");
 const { createMerkleTree } = require("../helpers/merkle");
 const { generateRewardProof, generateRewardNotes, generateRewardTree, generateNoteProof, proofToSolidity } = require("../helpers/rewardProofHelper");
@@ -10,6 +11,25 @@ describe("Reward Claiming Phase Gas Benchmarks", function () {
   let identityContract, zkIdentityContract, zkDataContract, rewardVerifier;
   let owner, producer, consumer, delegate1, delegate2, manager1, manager2, recipient;
   const REGISTRATION_DEPOSIT = ethers.parseEther("1");
+
+  // Store benchmark results for the final gas comparison report
+  const benchmarkResults = {
+    depositReward: null,
+    claimReward: null,
+    claimRewardWithRelayerFee: null
+  };
+
+  after(function () {
+    // Save benchmark results to JSON file so generateReport.js can consume them
+    const resultsDir = path.join(__dirname, "../../benchmark-results");
+    if (!fs.existsSync(resultsDir)) {
+      fs.mkdirSync(resultsDir, { recursive: true });
+    }
+
+    const resultsPath = path.join(resultsDir, "reward-results.json");
+    fs.writeFileSync(resultsPath, JSON.stringify(benchmarkResults, null, 2));
+    console.log(`\nReward benchmark results saved to: ${resultsPath}`);
+  });
 
   beforeEach(async function () {
     [owner, producer, consumer, delegate1, delegate2, manager1, manager2, recipient] = await ethers.getSigners();
@@ -57,7 +77,8 @@ describe("Reward Claiming Phase Gas Benchmarks", function () {
     const identityNullifier1 = randomFieldElement();
     const identityCommitment1 = await poseidonHash2(identitySecret1, identityNullifier1);
     const identityCommitmentHex = "0x" + identityCommitment1.toString(16).padStart(64, "0");
-    await zkIdentityContract.connect(delegate1).registerIdentity(identityCommitmentHex, { value: REGISTRATION_DEPOSIT });
+    // For testing, we can use 0 as the poseidon root since the contract will compute its own root
+    await zkIdentityContract.connect(delegate1).registerIdentity(identityCommitmentHex, 0, { value: REGISTRATION_DEPOSIT });
   });
 
   describe("ZK: claimReward()", function () {
@@ -71,7 +92,9 @@ describe("Reward Claiming Phase Gas Benchmarks", function () {
       const noteCommitments = notes.map(n => n.commitment);
       const denominations = notes.map(n => n.denomination);
       
-      await zkDataContract.connect(owner).depositReward(noteCommitments, denominations, { value: rewardAmount });
+      const depositTx = await zkDataContract.connect(owner).depositReward(noteCommitments, denominations, { value: rewardAmount });
+      const depositReceipt = await depositTx.wait();
+      benchmarkResults.depositReward = depositReceipt.gasUsed.toString();
       
       // Generate valid ZK proof for the note
       const noteProofData = noteProofs[0];
@@ -93,6 +116,7 @@ describe("Reward Claiming Phase Gas Benchmarks", function () {
         0n // relayerFee
       );
       const receipt = await tx.wait();
+      benchmarkResults.claimReward = receipt.gasUsed.toString();
       
       console.log(`claimReward() gas (with valid proof): ${receipt.gasUsed.toString()}`);
     });
@@ -130,6 +154,7 @@ describe("Reward Claiming Phase Gas Benchmarks", function () {
         relayerFee
       );
       const receipt = await tx.wait();
+      benchmarkResults.claimRewardWithRelayerFee = receipt.gasUsed.toString();
       
       console.log(`claimReward() gas (with relayer fee): ${receipt.gasUsed.toString()}`);
     });
