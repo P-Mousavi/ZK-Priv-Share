@@ -640,6 +640,86 @@ contract ZKDataContract {
     }
 
     /**
+     * @dev Internal helper to validate ZK dispute parameters and proof
+     * @return nullifierHash The nullifier hash from the proof
+     */
+    function _validateZKDispute(
+        uint256 _requestId,
+        address _defendant,
+        DisputeReason _reason,
+        string calldata _evidenceCid,
+        uint256[2] calldata a,
+        uint256[2][2] calldata b,
+        uint256[2] calldata c,
+        uint256[3] calldata input
+    ) internal view returns (bytes32 nullifierHash) {
+        AccessRequest storage req = accessRequests[_requestId];
+        CtiShare storage cti = ctiShares[req.ctiId];
+        
+        // Check defendant is part of the transaction
+        require(_defendant == req.allocatedDelegate || _defendant == cti.producer, "Invalid defendant");
+        
+        require(req.status == RequestStatus.Responded || req.status == RequestStatus.CredentialsProvided, "Invalid status for dispute");
+        require(_reason != DisputeReason.NONE, "Dispute reason cannot be NONE");
+        require(bytes(_evidenceCid).length >= 10 && bytes(_evidenceCid).length <= 200, "Invalid IPFS CID format");
+
+        // 1. Validate actionId binds proof to this specific dispute
+        // The circuit uses actionId mod FIELD_ORDER (Baby Jubjub field), so we must do the same
+        // Verifier expects public signals in order: [root, nullifierHash, actionId]
+        bytes32 expectedActionId = keccak256(abi.encodePacked(_requestId, uint256(_reason), "DISPUTE"));
+        require(input[2] == uint256(expectedActionId) % FIELD_ORDER, "Invalid Action ID");
+        
+        // 2. Validate Merkle Root
+        require(zkIdentity.roots(input[0]), "Invalid Merkle Root");
+
+        // 3. Verify ZK Proof
+        require(_verifyZKProof(a, b, c, input), "Invalid ZK Proof");
+
+        // 4. Check nullifier to prevent replay
+        nullifierHash = bytes32(input[1]);
+        require(!disputeNullifiers[nullifierHash], "Dispute already raised with this proof");
+    }
+
+    /**
+     * @dev Internal helper to store ZK dispute state
+     */
+    function _storeZKDispute(
+        uint256 _requestId,
+        address _defendant,
+        DisputeReason _reason,
+        string calldata _evidenceCid,
+        uint256 _payoutCommitment,
+        uint256 _identityCommitment,
+        uint256 _accuserPayoutCommitment,
+        bytes32 _nullifierHash
+    ) internal {
+        AccessRequest storage req = accessRequests[_requestId];
+        
+        // Mark nullifier as used
+        disputeNullifiers[_nullifierHash] = true;
+        
+        // Update request status
+        req.status = RequestStatus.Disputed;
+
+        // Create new dispute
+        disputeCounter++;
+        Dispute storage d = disputes[disputeCounter];
+        // In ZK mode, we don't store the complainant address (it's anonymous)
+        d.complainant = address(0); // Use address(0) as marker for ZK dispute
+        d.defendant = _defendant;
+        d.accessRequestId = _requestId;
+        d.reason = _reason;
+        d.evidenceCid = _evidenceCid;
+        d.isOpen = true;
+        d.payoutCommitment = _payoutCommitment;
+        d.identityCommitment = _identityCommitment;
+        d.accuserPayoutCommitment = _accuserPayoutCommitment;
+        d.isZKDispute = true;
+
+        emit ZKDisputeRaised(disputeCounter, _nullifierHash);
+    }
+
+    /**
      * @dev [REGULATION - Step 1 ZK] Raise a dispute using zero-knowledge proof.
      * Allows a registered party to raise a dispute without revealing their identity.
      * @param _requestId The access request ID related to the dispute
@@ -666,50 +746,27 @@ contract ZKDataContract {
         uint256[2] calldata c,
         uint256[3] calldata input
     ) external {
-        AccessRequest storage req = accessRequests[_requestId];
-        CtiShare storage cti = ctiShares[req.ctiId];
+        bytes32 nullifierHash = _validateZKDispute(
+            _requestId,
+            _defendant,
+            _reason,
+            _evidenceCid,
+            a,
+            b,
+            c,
+            input
+        );
         
-        // Check defendant is part of the transaction
-        require(_defendant == req.allocatedDelegate || _defendant == cti.producer, "Invalid defendant");
-        
-        require(req.status == RequestStatus.Responded || req.status == RequestStatus.CredentialsProvided, "Invalid status for dispute");
-        require(_reason != DisputeReason.NONE, "Dispute reason cannot be NONE");
-        require(bytes(_evidenceCid).length >= 10 && bytes(_evidenceCid).length <= 200, "Invalid IPFS CID format");
-
-        // 1. Validate actionId binds proof to this specific dispute
-        // The circuit uses actionId mod FIELD_ORDER (Baby Jubjub field), so we must do the same
-        // Verifier expects public signals in order: [root, nullifierHash, actionId]
-        bytes32 expectedActionId = keccak256(abi.encodePacked(_requestId, uint256(_reason), "DISPUTE"));
-        require(input[2] == uint256(expectedActionId) % FIELD_ORDER, "Invalid Action ID");
-        
-        // 2. Validate Merkle Root
-        require(zkIdentity.roots(input[0]), "Invalid Merkle Root");
-
-        // 3. Verify ZK Proof
-        require(_verifyZKProof(a, b, c, input), "Invalid ZK Proof");
-
-        // 4. Check nullifier to prevent replay
-        bytes32 nullifierHash = bytes32(input[1]);
-        require(!disputeNullifiers[nullifierHash], "Dispute already raised with this proof");
-        disputeNullifiers[nullifierHash] = true;
-
-        req.status = RequestStatus.Disputed;
-
-        disputeCounter++;
-        Dispute storage d = disputes[disputeCounter];
-        // In ZK mode, we don't store the complainant address (it's anonymous)
-        d.complainant = address(0); // Use address(0) as marker for ZK dispute
-        d.defendant = _defendant;
-        d.accessRequestId = _requestId;
-        d.reason = _reason;
-        d.evidenceCid = _evidenceCid;
-        d.isOpen = true;
-        d.payoutCommitment = _payoutCommitment;
-        d.identityCommitment = _identityCommitment;
-        d.accuserPayoutCommitment = _accuserPayoutCommitment;
-        d.isZKDispute = true;
-
-        emit ZKDisputeRaised(disputeCounter, nullifierHash);
+        _storeZKDispute(
+            _requestId,
+            _defendant,
+            _reason,
+            _evidenceCid,
+            _payoutCommitment,
+            _identityCommitment,
+            _accuserPayoutCommitment,
+            nullifierHash
+        );
     }
 
     /**

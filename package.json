@@ -16,12 +16,14 @@
   "license": "ISC",
   "type": "commonjs",
   "dependencies": {
+    "@semaphore-protocol/contracts": "^4.14.3",
+    "@zk-kit/incremental-merkle-tree": "^1.1.0",
+    "@zk-kit/incremental-merkle-tree.sol": "^1.7.0",
     "circom": "^0.5.46",
     "circomlib": "^2.0.5",
     "circomlibjs": "^0.1.7",
     "dotenv": "^17.2.3",
     "ethers": "^6.15.0",
-    "poseidon-solidity": "^0.0.5",
     "snarkjs": "^0.7.5",
     "solc": "^0.8.30"
   },

@@ -37,9 +37,10 @@ describe("ZKIdentity Contract", function () {
   describe("Identity Registration", () => {
     it("should register identity with correct deposit", async () => {
       const commitment = ethers.toBigInt(ethers.id("user1"));
+      const poseidonRoot = ethers.toBigInt(ethers.id("root1"));
 
       await expect(
-        zkIdentity.connect(user1).registerIdentity(commitment, { value: REGISTRATION_DEPOSIT })
+        zkIdentity.connect(user1).registerIdentity(commitment, poseidonRoot, { value: REGISTRATION_DEPOSIT })
       ).to.emit(zkIdentity, "IdentityRegistered")
         .withArgs(commitment, 0);
 
@@ -49,29 +50,33 @@ describe("ZKIdentity Contract", function () {
 
     it("should fail to register with incorrect deposit", async () => {
       const commitment = ethers.toBigInt(ethers.id("user1"));
+      const poseidonRoot = ethers.toBigInt(ethers.id("root1"));
       const wrongDeposit = ethers.parseEther("0.5");
 
       await expect(
-        zkIdentity.connect(user1).registerIdentity(commitment, { value: wrongDeposit })
+        zkIdentity.connect(user1).registerIdentity(commitment, poseidonRoot, { value: wrongDeposit })
       ).to.be.revertedWith("Incorrect deposit");
     });
 
     it("should fail to register same commitment twice", async () => {
       const commitment = ethers.toBigInt(ethers.id("user1"));
+      const poseidonRoot = ethers.toBigInt(ethers.id("root1"));
 
-      await zkIdentity.connect(user1).registerIdentity(commitment, { value: REGISTRATION_DEPOSIT });
+      await zkIdentity.connect(user1).registerIdentity(commitment, poseidonRoot, { value: REGISTRATION_DEPOSIT });
 
       await expect(
-        zkIdentity.connect(user2).registerIdentity(commitment, { value: REGISTRATION_DEPOSIT })
+        zkIdentity.connect(user2).registerIdentity(commitment, poseidonRoot, { value: REGISTRATION_DEPOSIT })
       ).to.be.revertedWith("Already registered");
     });
 
     it("should allow multiple identity registrations", async () => {
       const commitment1 = ethers.toBigInt(ethers.id("user1"));
       const commitment2 = ethers.toBigInt(ethers.id("user2"));
+      const poseidonRoot1 = ethers.toBigInt(ethers.id("root1"));
+      const poseidonRoot2 = ethers.toBigInt(ethers.id("root2"));
 
-      await zkIdentity.connect(user1).registerIdentity(commitment1, { value: REGISTRATION_DEPOSIT });
-      await zkIdentity.connect(user2).registerIdentity(commitment2, { value: REGISTRATION_DEPOSIT });
+      await zkIdentity.connect(user1).registerIdentity(commitment1, poseidonRoot1, { value: REGISTRATION_DEPOSIT });
+      await zkIdentity.connect(user2).registerIdentity(commitment2, poseidonRoot2, { value: REGISTRATION_DEPOSIT });
 
       expect(await zkIdentity.deposits(commitment1)).to.equal(REGISTRATION_DEPOSIT);
       expect(await zkIdentity.deposits(commitment2)).to.equal(REGISTRATION_DEPOSIT);
@@ -80,8 +85,9 @@ describe("ZKIdentity Contract", function () {
 
     it("should track deposits correctly", async () => {
       const commitment = ethers.toBigInt(ethers.id("user1"));
+      const poseidonRoot = ethers.toBigInt(ethers.id("root1"));
 
-      await zkIdentity.connect(user1).registerIdentity(commitment, { value: REGISTRATION_DEPOSIT });
+      await zkIdentity.connect(user1).registerIdentity(commitment, poseidonRoot, { value: REGISTRATION_DEPOSIT });
 
       const deposit = await zkIdentity.deposits(commitment);
       expect(deposit).to.equal(REGISTRATION_DEPOSIT);
@@ -91,8 +97,9 @@ describe("ZKIdentity Contract", function () {
   describe("Root Management", () => {
     it("should mark current root as valid after registration", async () => {
       const commitment = ethers.toBigInt(ethers.id("user1"));
+      const poseidonRoot = ethers.toBigInt(ethers.id("root1"));
 
-      await zkIdentity.connect(user1).registerIdentity(commitment, { value: REGISTRATION_DEPOSIT });
+      await zkIdentity.connect(user1).registerIdentity(commitment, poseidonRoot, { value: REGISTRATION_DEPOSIT });
 
       const currentRoot = await zkIdentity.currentRoot();
       expect(await zkIdentity.roots(currentRoot)).to.be.true;
@@ -101,9 +108,11 @@ describe("ZKIdentity Contract", function () {
     it("should have valid root after multiple registrations", async () => {
       const commitment1 = ethers.toBigInt(ethers.id("user1"));
       const commitment2 = ethers.toBigInt(ethers.id("user2"));
+      const poseidonRoot1 = ethers.toBigInt(ethers.id("root1"));
+      const poseidonRoot2 = ethers.toBigInt(ethers.id("root2"));
 
-      await zkIdentity.connect(user1).registerIdentity(commitment1, { value: REGISTRATION_DEPOSIT });
-      await zkIdentity.connect(user2).registerIdentity(commitment2, { value: REGISTRATION_DEPOSIT });
+      await zkIdentity.connect(user1).registerIdentity(commitment1, poseidonRoot1, { value: REGISTRATION_DEPOSIT });
+      await zkIdentity.connect(user2).registerIdentity(commitment2, poseidonRoot2, { value: REGISTRATION_DEPOSIT });
 
       const currentRoot = await zkIdentity.currentRoot();
       expect(await zkIdentity.roots(currentRoot)).to.be.true;
@@ -113,7 +122,8 @@ describe("ZKIdentity Contract", function () {
   describe("Deposit Slashing", () => {
     beforeEach(async () => {
       const commitment = ethers.toBigInt(ethers.id("user1"));
-      await zkIdentity.connect(user1).registerIdentity(commitment, { value: REGISTRATION_DEPOSIT });
+      const poseidonRoot = ethers.toBigInt(ethers.id("root1"));
+      await zkIdentity.connect(user1).registerIdentity(commitment, poseidonRoot, { value: REGISTRATION_DEPOSIT });
     });
 
     it("should allow slashing a deposit", async () => {
@@ -169,9 +179,10 @@ describe("ZKIdentity Contract", function () {
   describe("Edge Cases", () => {
     it("should handle zero commitment", async () => {
       const zeroCommitment = 0n;
+      const poseidonRoot = ethers.toBigInt(ethers.id("root1"));
 
       await expect(
-        zkIdentity.connect(user1).registerIdentity(zeroCommitment, { value: REGISTRATION_DEPOSIT })
+        zkIdentity.connect(user1).registerIdentity(zeroCommitment, poseidonRoot, { value: REGISTRATION_DEPOSIT })
       ).to.emit(zkIdentity, "IdentityRegistered");
 
       expect(await zkIdentity.deposits(zeroCommitment)).to.equal(REGISTRATION_DEPOSIT);
@@ -180,9 +191,10 @@ describe("ZKIdentity Contract", function () {
     it("should handle maximum field element commitment", async () => {
       const maxField = ethers.MaxUint256;
       const commitment = maxField;
+      const poseidonRoot = ethers.toBigInt(ethers.id("root1"));
 
       await expect(
-        zkIdentity.connect(user1).registerIdentity(commitment, { value: REGISTRATION_DEPOSIT })
+        zkIdentity.connect(user1).registerIdentity(commitment, poseidonRoot, { value: REGISTRATION_DEPOSIT })
       ).to.emit(zkIdentity, "IdentityRegistered");
 
       expect(await zkIdentity.deposits(commitment)).to.equal(REGISTRATION_DEPOSIT);
@@ -190,9 +202,10 @@ describe("ZKIdentity Contract", function () {
 
     it("should handle registration with no value (should fail)", async () => {
       const commitment = ethers.toBigInt(ethers.id("user1"));
+      const poseidonRoot = ethers.toBigInt(ethers.id("root1"));
 
       await expect(
-        zkIdentity.connect(user1).registerIdentity(commitment, { value: 0 })
+        zkIdentity.connect(user1).registerIdentity(commitment, poseidonRoot, { value: 0 })
       ).to.be.revertedWith("Incorrect deposit");
     });
   });

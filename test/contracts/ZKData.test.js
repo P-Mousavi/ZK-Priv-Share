@@ -1,5 +1,6 @@
 const { expect } = require("chai");
 const { ethers } = require("hardhat");
+const { generateRewardProof, proofToSolidity } = require("../helpers/rewardProofHelper");
 
 describe("ZKDataContract", function () {
   let zkData, identityContract, zkIdentity, rewardVerifier;
@@ -566,7 +567,8 @@ describe("ZKDataContract", function () {
 
       // Register a ZK identity
       const commitment = ethers.toBigInt(ethers.id("delegate1"));
-      await zkIdentity.connect(delegate1).registerIdentity(commitment, { value: REGISTRATION_DEPOSIT });
+      const poseidonRoot = ethers.toBigInt(ethers.id("root1"));
+      await zkIdentity.connect(delegate1).registerIdentity(commitment, poseidonRoot, { value: REGISTRATION_DEPOSIT });
     });
 
     it("should allow consumer to make ZK access request", async () => {
@@ -684,34 +686,34 @@ describe("ZKDataContract", function () {
       await zkData.setTestingMode(true);
       
       const denomination = ethers.parseEther("0.1");
-      const noteCommitment = ethers.hexlify(ethers.randomBytes(32));
       
+      // Generate a valid reward proof
+      const secret = ethers.toBigInt(ethers.randomBytes(32));
+      const nullifier = ethers.toBigInt(ethers.randomBytes(32));
+      const proofData = await generateRewardProof(secret, denomination, nullifier);
+      const solidityProof = await proofToSolidity(proofData);
+      
+      // Deposit the reward note
       await zkData.connect(owner).depositReward(
-        [noteCommitment],
+        [proofData.noteCommitment],
         [denomination],
         { value: denomination }
       );
       
-      await zkData.setRewardTreeRoot(ethers.toBigInt(ethers.randomBytes(32)));
+      // Set the reward tree root
+      await zkData.setRewardTreeRoot(proofData.input.root);
       
       const relayerFee = ethers.parseEther("0.2");
       
-      // Mock proof parameters
-      const a = [1, 2];
-      const b = [[1, 2], [1, 2]];
-      const c = [1, 2];
-      const root = ethers.toBigInt(ethers.randomBytes(32));
-      const nullifierHash = ethers.toBigInt(ethers.randomBytes(32));
-      
       await expect(
-        zkData.connect(recipient).claimReward(
-          a,
-          b,
-          c,
-          root,
-          denomination,
-          nullifierHash,
-          recipient.address,
+        zkData.connect(consumer).claimReward(
+          solidityProof.pA,
+          solidityProof.pB,
+          solidityProof.pC,
+          proofData.input.root,
+          proofData.input.denomination,
+          proofData.input.nullifierHash,
+          consumer.address,
           relayerFee
         )
       ).to.be.revertedWith("Relayer fee exceeds reward amount");
@@ -739,8 +741,8 @@ describe("ZKDataContract", function () {
       
       // Verify all notes are minted
       for (const note of notes) {
-        expect(await zkData.rewardNoteDenominations(note.commitment)).to.equal(0n);
-        // Note: In testing mode, the mapping is not set, so we check the function doesn't revert
+        const denomination = await zkData.rewardNoteDenominations(note.commitment);
+        expect(denomination).to.be.greaterThan(0n);
       }
     });
 
@@ -838,8 +840,10 @@ describe("ZKDataContract", function () {
       // Register ZK identities for managers
       const managerCommitment1 = ethers.toBigInt(ethers.id("manager1_zk"));
       const managerCommitment2 = ethers.toBigInt(ethers.id("manager2_zk"));
-      await zkIdentity.connect(manager1).registerIdentity(managerCommitment1, { value: REGISTRATION_DEPOSIT });
-      await zkIdentity.connect(manager2).registerIdentity(managerCommitment2, { value: REGISTRATION_DEPOSIT });
+      const poseidonRoot1 = ethers.toBigInt(ethers.id("root1"));
+      const poseidonRoot2 = ethers.toBigInt(ethers.id("root2"));
+      await zkIdentity.connect(manager1).registerIdentity(managerCommitment1, poseidonRoot1, { value: REGISTRATION_DEPOSIT });
+      await zkIdentity.connect(manager2).registerIdentity(managerCommitment2, poseidonRoot2, { value: REGISTRATION_DEPOSIT });
 
       // Get the current root
       const currentRoot = await zkIdentity.currentRoot();
@@ -902,7 +906,8 @@ describe("ZKDataContract", function () {
     it("should bind actionId to requestId in provideResponseZK to prevent front-running", async () => {
       // Register a ZK identity for the delegate
       const commitment = ethers.toBigInt(ethers.id("delegate1_zk"));
-      await zkIdentity.connect(delegate1).registerIdentity(commitment, { value: REGISTRATION_DEPOSIT });
+      const poseidonRoot = ethers.toBigInt(ethers.id("root1"));
+      await zkIdentity.connect(delegate1).registerIdentity(commitment, poseidonRoot, { value: REGISTRATION_DEPOSIT });
 
       // Create a ZK access request
       await zkData.connect(consumer).requestAccess(1);
@@ -953,7 +958,8 @@ describe("ZKDataContract", function () {
 
       // Register ZK identity
       const commitment = ethers.toBigInt(ethers.id("complainant_zk"));
-      await zkIdentity.connect(consumer).registerIdentity(commitment, { value: REGISTRATION_DEPOSIT });
+      const poseidonRoot = ethers.toBigInt(ethers.id("root1"));
+      await zkIdentity.connect(consumer).registerIdentity(commitment, poseidonRoot, { value: REGISTRATION_DEPOSIT });
 
       const requestId = 1;
       const reason = 1; // TAMPERED_CTI
@@ -1018,7 +1024,8 @@ describe("ZKDataContract", function () {
 
       // Register ZK identity for manager
       const commitment = ethers.toBigInt(ethers.id("manager_zk"));
-      await zkIdentity.connect(manager1).registerIdentity(commitment, { value: REGISTRATION_DEPOSIT });
+      const poseidonRoot = ethers.toBigInt(ethers.id("root1"));
+      await zkIdentity.connect(manager1).registerIdentity(commitment, poseidonRoot, { value: REGISTRATION_DEPOSIT });
 
       const disputeId = 1;
       const isGuilty = true;
@@ -1128,7 +1135,8 @@ describe("ZKDataContract", function () {
     it("should slash ZK identity commitment when delegate is guilty", async () => {
       // Register a ZK identity for the delegate
       const commitment = ethers.toBigInt(ethers.id("delegate1_zk"));
-      await zkIdentity.connect(delegate1).registerIdentity(commitment, { value: REGISTRATION_DEPOSIT });
+      const poseidonRoot = ethers.toBigInt(ethers.id("root1"));
+      await zkIdentity.connect(delegate1).registerIdentity(commitment, poseidonRoot, { value: REGISTRATION_DEPOSIT });
 
       // Verify the commitment has a deposit
       const depositBefore = await zkIdentity.deposits(commitment);

@@ -1,83 +1,73 @@
 const { expect } = require("chai");
 const { ethers } = require("hardhat");
-const { poseidonHash2 } = require("./helpers/poseidon");
+const { buildPoseidon } = require("circomlibjs");
 
-describe("Poseidon Hash Compatibility", function () {
-  let zkIdentity;
+describe("Poseidon Compatibility", function () {
+    let poseidon;
+    let wrapper;
 
-  before(async function () {
-    // Deploy ZKIdentity contract (poseidon is now internal)
-    const ZKIdentityFactory = await ethers.getContractFactory("ZKIdentity");
-    zkIdentity = await ZKIdentityFactory.deploy();
-    await zkIdentity.waitForDeployment();
-  });
+    before(async function () {
+        poseidon = await buildPoseidon();
 
-  it("Should match circomlib poseidon hash for two inputs", async function () {
-    // Test with various input pairs
-    const testCases = [
-      [1, 2],
-      [123456789, 987654321],
-      [BigInt("0x123456789abcdef"), BigInt("0xfedcba987654321")],
-      [0, 1],
-      [BigInt("21888242871839275222246405745257275088548364400416034343698204186575808495616"), 0], // FIELD_SIZE - 1
-    ];
+        const Wrapper = await ethers.getContractFactory(
+            "PoseidonWrapper"
+        );
 
-    for (const [left, right] of testCases) {
-      // Compute hash using circomlib JavaScript
-      const jsHash = await poseidonHash2(left, right);
-      
-      // Compute hash using Solidity contract
-      const solidityHash = await zkIdentity.testPoseidon(left, right);
-      
-      console.log(`Testing inputs: ${left}, ${right}`);
-      console.log(`JS hash: ${jsHash}`);
-      console.log(`Solidity hash: ${solidityHash}`);
-      
-      // They should match
-      expect(BigInt(solidityHash)).to.equal(jsHash);
-    }
-  });
+        wrapper = await Wrapper.deploy();
 
-  it("Should produce consistent merkle roots", async function () {
-    // Test that merkle tree computation is consistent
-    const leaves = [
-      await poseidonHash2(1, 2),
-      await poseidonHash2(3, 4),
-      await poseidonHash2(5, 6),
-    ];
+        await wrapper.waitForDeployment();
+    });
 
-    // Register identities to build merkle tree
-    const [signer] = await ethers.getSigners();
-    const deposit = ethers.parseEther("1");
 
-    for (const leaf of leaves) {
-      const tx = await zkIdentity.connect(signer).registerIdentity(leaf, {
-        value: deposit,
-      });
-      await tx.wait();
+    async function compare(left, right) {
+        const jsHash = poseidon.F.toString(
+            poseidon([BigInt(left), BigInt(right)])
+        );
+
+        const solidityHash = (
+            await wrapper.hash(left, right)
+        ).toString();
+
+        expect(solidityHash).to.equal(jsHash);
     }
 
-    // Get the current root from contract
-    const contractRoot = await zkIdentity.currentRoot();
-    console.log(`Contract merkle root: ${contractRoot}`);
-    
-    // Compute expected root manually using circomlib poseidon
-    let level = leaves;
-    while (level.length > 1) {
-      const newLevel = [];
-      for (let i = 0; i < level.length; i += 2) {
-        const left = level[i];
-        const right = level[i + 1] || left;
-        const hash = await poseidonHash2(left, right);
-        newLevel.push(hash);
-      }
-      level = newLevel;
+
+    it("matches zero", async function () {
+        await compare(0, 0);
+    });
+
+    it("matches small values", async function () {
+        await compare(1, 2);
+        await compare(5, 7);
+        await compare(123, 456);
+    });
+
+    it("matches random values", async function () {
+    for (let i = 0; i < 20; i++) {
+        const left = BigInt(
+            ethers.hexlify(ethers.randomBytes(30))
+        );
+
+        const right = BigInt(
+            ethers.hexlify(ethers.randomBytes(30))
+        );
+
+        await compare(left, right);
     }
-    const expectedRoot = level[0];
-    
-    console.log(`Expected merkle root: ${expectedRoot}`);
-    
-    // They should match
-    expect(BigInt(contractRoot)).to.equal(expectedRoot);
-  });
+    });
+
+    it("matches merkle parent calculation", async function () {
+    const left = 12345n;
+    const right = 67890n;
+
+    const jsParent = poseidon.F.toString(
+        poseidon([left, right])
+    );
+
+    const solidityParent = (
+        await wrapper.hash(left, right)
+    ).toString();
+
+    expect(solidityParent).to.equal(jsParent);
+    });
 });
