@@ -1,5 +1,6 @@
 const { expect } = require("chai");
 const { ethers } = require("hardhat");
+const { randomFieldElement } = require("../helpers/poseidon");
 
 describe("Identity Contract", function () {
   let identityContract;
@@ -10,7 +11,26 @@ describe("Identity Contract", function () {
   beforeEach(async function () {
     [owner, org1, org2, dataContract] = await ethers.getSigners();
 
-    const IdentityContractFactory = await ethers.getContractFactory("IdentityContract");
+    // Deploy PoseidonT3 library first (nested dependency)
+    const PoseidonT3Factory = await ethers.getContractFactory("poseidon-solidity/PoseidonT3.sol:PoseidonT3");
+    const poseidonT3 = await PoseidonT3Factory.deploy();
+    await poseidonT3.waitForDeployment();
+
+    // Deploy IncrementalBinaryTree library with PoseidonT3 linked
+    const IncrementalBinaryTreeFactory = await ethers.getContractFactory("@zk-kit/incremental-merkle-tree.sol/IncrementalBinaryTree.sol:IncrementalBinaryTree", {
+      libraries: {
+        PoseidonT3: await poseidonT3.getAddress()
+      }
+    });
+    const incrementalBinaryTree = await IncrementalBinaryTreeFactory.deploy();
+    await incrementalBinaryTree.waitForDeployment();
+
+    // Deploy IdentityContract with library linked
+    const IdentityContractFactory = await ethers.getContractFactory("IdentityContract", {
+      libraries: {
+        IncrementalBinaryTree: await incrementalBinaryTree.getAddress()
+      }
+    });
     identityContract = await IdentityContractFactory.deploy({ value: ethers.parseEther("10") });
     await identityContract.waitForDeployment();
   });
@@ -24,7 +44,8 @@ describe("Identity Contract", function () {
       expect(await identityContract.REGISTRATION_DEPOSIT()).to.equal(REGISTRATION_DEPOSIT);
     });
 
-    it("should start with no registered organisations", async () => {
+    it("should start with zero deposits", async () => {
+      const commitment = randomFieldElement();
       expect(await identityContract.isRegistered(org1.address)).to.be.false;
       expect(await identityContract.isRegistered(org2.address)).to.be.false;
     });

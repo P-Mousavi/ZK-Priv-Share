@@ -1,6 +1,7 @@
 const { expect } = require("chai");
 const { ethers } = require("hardhat");
 const { generateRewardProof, proofToSolidity } = require("../helpers/rewardProofHelper");
+const { randomFieldElement } = require("../helpers/poseidon");
 
 describe("ZKDataContract", function () {
   let zkData, identityContract, zkIdentity, rewardVerifier;
@@ -14,13 +15,35 @@ describe("ZKDataContract", function () {
   beforeEach(async function () {
     [owner, producer, consumer, delegate1, delegate2, manager1, manager2, manager3] = await ethers.getSigners();
 
-    // Deploy IdentityContract
-    const IdentityFactory = await ethers.getContractFactory("IdentityContract");
+    // Deploy PoseidonT3 library first (nested dependency)
+    const PoseidonT3Factory = await ethers.getContractFactory("poseidon-solidity/PoseidonT3.sol:PoseidonT3");
+    const poseidonT3 = await PoseidonT3Factory.deploy();
+    await poseidonT3.waitForDeployment();
+
+    // Deploy IncrementalBinaryTree library with PoseidonT3 linked
+    const IncrementalBinaryTreeFactory = await ethers.getContractFactory("@zk-kit/incremental-merkle-tree.sol/IncrementalBinaryTree.sol:IncrementalBinaryTree", {
+      libraries: {
+        PoseidonT3: await poseidonT3.getAddress()
+      }
+    });
+    const incrementalBinaryTree = await IncrementalBinaryTreeFactory.deploy();
+    await incrementalBinaryTree.waitForDeployment();
+
+    // Deploy IdentityContract with library linked
+    const IdentityFactory = await ethers.getContractFactory("IdentityContract", {
+      libraries: {
+        IncrementalBinaryTree: await incrementalBinaryTree.getAddress()
+      }
+    });
     identityContract = await IdentityFactory.deploy({ value: ethers.parseEther("20") });
     await identityContract.waitForDeployment();
 
-    // Deploy ZKIdentity
-    const ZKIdentityFactory = await ethers.getContractFactory("ZKIdentity");
+    // Deploy ZKIdentity with library linked
+    const ZKIdentityFactory = await ethers.getContractFactory("ZKIdentity", {
+      libraries: {
+        IncrementalBinaryTree: await incrementalBinaryTree.getAddress()
+      }
+    });
     zkIdentity = await ZKIdentityFactory.deploy();
     await zkIdentity.waitForDeployment();
 
@@ -566,9 +589,8 @@ describe("ZKDataContract", function () {
       );
 
       // Register a ZK identity
-      const commitment = ethers.toBigInt(ethers.id("delegate1"));
-      const poseidonRoot = ethers.toBigInt(ethers.id("root1"));
-      await zkIdentity.connect(delegate1).registerIdentity(commitment, poseidonRoot, { value: REGISTRATION_DEPOSIT });
+      const commitment = randomFieldElement();
+      await zkIdentity.connect(delegate1).registerIdentity(commitment, { value: REGISTRATION_DEPOSIT });
     });
 
     it("should allow consumer to make ZK access request", async () => {
@@ -838,15 +860,15 @@ describe("ZKDataContract", function () {
       await zkData.connect(consumer).raiseDispute(1, delegate1.address, 1, evidenceCid);
 
       // Register ZK identities for managers
-      const managerCommitment1 = ethers.toBigInt(ethers.id("manager1_zk"));
-      const managerCommitment2 = ethers.toBigInt(ethers.id("manager2_zk"));
-      const poseidonRoot1 = ethers.toBigInt(ethers.id("root1"));
-      const poseidonRoot2 = ethers.toBigInt(ethers.id("root2"));
-      await zkIdentity.connect(manager1).registerIdentity(managerCommitment1, poseidonRoot1, { value: REGISTRATION_DEPOSIT });
-      await zkIdentity.connect(manager2).registerIdentity(managerCommitment2, poseidonRoot2, { value: REGISTRATION_DEPOSIT });
+      const managerCommitment1 = randomFieldElement();
+      const managerCommitment2 = randomFieldElement();
+      await zkIdentity.connect(manager1).registerIdentity(managerCommitment1, { value: REGISTRATION_DEPOSIT });
+      await zkIdentity.connect(manager2).registerIdentity(managerCommitment2, { value: REGISTRATION_DEPOSIT });
 
-      // Get the current root
-      const currentRoot = await zkIdentity.currentRoot();
+      // Get the current root from IdentityTree
+      const identityTreeAddress = await zkIdentity.identityTree();
+      const identityTree = await ethers.getContractAt("IdentityTree", identityTreeAddress);
+      const currentRoot = await identityTree.getRoot();
 
       // Create a valid actionId for the vote
       const disputeId = 1;
@@ -905,9 +927,8 @@ describe("ZKDataContract", function () {
 
     it("should bind actionId to requestId in provideResponseZK to prevent front-running", async () => {
       // Register a ZK identity for the delegate
-      const commitment = ethers.toBigInt(ethers.id("delegate1_zk"));
-      const poseidonRoot = ethers.toBigInt(ethers.id("root1"));
-      await zkIdentity.connect(delegate1).registerIdentity(commitment, poseidonRoot, { value: REGISTRATION_DEPOSIT });
+      const commitment = randomFieldElement();
+      await zkIdentity.connect(delegate1).registerIdentity(commitment, { value: REGISTRATION_DEPOSIT });
 
       // Create a ZK access request
       await zkData.connect(consumer).requestAccess(1);
@@ -922,7 +943,9 @@ describe("ZKDataContract", function () {
       // This ensures the proof is bound to the specific request, preventing front-running
 
       // Verify that the contract enforces actionId validation
-      const currentRoot = await zkIdentity.currentRoot();
+      const identityTreeAddress = await zkIdentity.identityTree();
+      const identityTree = await ethers.getContractAt("IdentityTree", identityTreeAddress);
+      const currentRoot = await identityTree.getRoot();
       const nullifierHash = ethers.keccak256(ethers.solidityPacked(["uint256", "uint256"], [commitment, 99999]));
 
       const a = [1, 2];
@@ -957,9 +980,8 @@ describe("ZKDataContract", function () {
       await zkData.connect(delegate1).provideResponse(1, responseIpfsCid);
 
       // Register ZK identity
-      const commitment = ethers.toBigInt(ethers.id("complainant_zk"));
-      const poseidonRoot = ethers.toBigInt(ethers.id("root1"));
-      await zkIdentity.connect(consumer).registerIdentity(commitment, poseidonRoot, { value: REGISTRATION_DEPOSIT });
+      const commitment = randomFieldElement();
+      await zkIdentity.connect(consumer).registerIdentity(commitment, { value: REGISTRATION_DEPOSIT });
 
       const requestId = 1;
       const reason = 1; // TAMPERED_CTI
@@ -968,7 +990,9 @@ describe("ZKDataContract", function () {
       // The contract at line 566-567 computes the expected actionId and validates it
       // This prevents front-running by binding the proof to specific dispute parameters
 
-      const currentRoot = await zkIdentity.currentRoot();
+      const identityTreeAddress = await zkIdentity.identityTree();
+      const identityTree = await ethers.getContractAt("IdentityTree", identityTreeAddress);
+      const currentRoot = await identityTree.getRoot();
       const nullifierHash = ethers.keccak256(ethers.solidityPacked(["uint256", "uint256"], [commitment, 88888]));
 
       const a = [1, 2];
@@ -1023,9 +1047,8 @@ describe("ZKDataContract", function () {
       await zkData.connect(consumer).raiseDispute(1, delegate1.address, 1, evidenceCid);
 
       // Register ZK identity for manager
-      const commitment = ethers.toBigInt(ethers.id("manager_zk"));
-      const poseidonRoot = ethers.toBigInt(ethers.id("root1"));
-      await zkIdentity.connect(manager1).registerIdentity(commitment, poseidonRoot, { value: REGISTRATION_DEPOSIT });
+      const commitment = randomFieldElement();
+      await zkIdentity.connect(manager1).registerIdentity(commitment, { value: REGISTRATION_DEPOSIT });
 
       const disputeId = 1;
       const isGuilty = true;
@@ -1034,7 +1057,9 @@ describe("ZKDataContract", function () {
       // The contract at line 625-626 computes the expected actionId and validates it
       // This prevents front-running by binding the proof to specific vote parameters
 
-      const currentRoot = await zkIdentity.currentRoot();
+      const identityTreeAddress = await zkIdentity.identityTree();
+      const identityTree = await ethers.getContractAt("IdentityTree", identityTreeAddress);
+      const currentRoot = await identityTree.getRoot();
       const nullifierHash = ethers.keccak256(ethers.solidityPacked(["uint256", "uint256"], [commitment, 77777]));
 
       const a = [1, 2];
@@ -1134,9 +1159,8 @@ describe("ZKDataContract", function () {
 
     it("should slash ZK identity commitment when delegate is guilty", async () => {
       // Register a ZK identity for the delegate
-      const commitment = ethers.toBigInt(ethers.id("delegate1_zk"));
-      const poseidonRoot = ethers.toBigInt(ethers.id("root1"));
-      await zkIdentity.connect(delegate1).registerIdentity(commitment, poseidonRoot, { value: REGISTRATION_DEPOSIT });
+      const commitment = randomFieldElement();
+      await zkIdentity.connect(delegate1).registerIdentity(commitment, { value: REGISTRATION_DEPOSIT });
 
       // Verify the commitment has a deposit
       const depositBefore = await zkIdentity.deposits(commitment);

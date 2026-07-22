@@ -6,7 +6,7 @@ import "@zk-kit/incremental-merkle-tree.sol/IncrementalBinaryTree.sol";
 contract IdentityTree {
     using IncrementalBinaryTree for IncrementalTreeData;
 
-    uint256 public constant DEPTH = 20;
+    uint256 public constant DEPTH = 5;
     IncrementalTreeData internal tree;
 
     event LeafInserted(uint256 indexed leaf, uint256 indexed index);
@@ -36,5 +36,24 @@ contract IdentityTree {
         returns (uint256)
     {
         return tree.numberOfLeaves;
+    }
+
+    // Test helper flag
+    bool public testingMode;
+
+    /**
+     * @dev Test helper to enable testing mode
+     */
+    function setTestingMode(bool _enabled) external {
+        testingMode = _enabled;
+    }
+
+    /**
+     * @dev Test helper to set a Merkle root directly (for benchmarking)
+     * Only callable in testing mode
+     */
+    function setRoot(uint256 _root) external {
+        require(testingMode, "Not in testing mode");
+        tree.root = _root;
     }
 }

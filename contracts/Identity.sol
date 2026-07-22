@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
+import "./IdentityTree.sol";
+
 /**
  * @title IdentityContract
  * @dev Manages organisation identities, registration, and security deposits (D).
@@ -11,6 +13,7 @@ pragma solidity ^0.8.20;
 contract IdentityContract {
     address public owner;
     address public dataContractAddress;
+    IdentityTree public identityTree;
 
     uint256 public constant REGISTRATION_DEPOSIT = 1 ether;
 
@@ -38,6 +41,7 @@ contract IdentityContract {
 
     constructor() payable {
         owner = msg.sender;
+        identityTree = new IdentityTree();
     }
 
     function setDataContract(address _dataContractAddress) external onlyOwner {
@@ -53,6 +57,10 @@ contract IdentityContract {
             msg.value,
             _identityInfoIpfsCid
         );
+
+        // Insert into IdentityTree using address as leaf (Poseidon-compatible)
+        // For non-ZK, we use the address directly as the leaf
+        identityTree.insert(uint256(uint160(msg.sender)));
 
         emit OrganisationRegistered(msg.sender, msg.value);
     }

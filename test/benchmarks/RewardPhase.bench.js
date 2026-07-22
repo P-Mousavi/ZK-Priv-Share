@@ -14,6 +14,7 @@ describe("Reward Claiming Phase Gas Benchmarks", function () {
 
   // Store benchmark results for the final gas comparison report
   const benchmarkResults = {
+    registerIdentityZK: null,
     depositReward: null,
     claimReward: null,
     claimRewardWithRelayerFee: null
@@ -34,15 +35,37 @@ describe("Reward Claiming Phase Gas Benchmarks", function () {
   beforeEach(async function () {
     [owner, producer, consumer, delegate1, delegate2, manager1, manager2, recipient] = await ethers.getSigners();
 
-    // Deploy Standard Identity Contract
-    const IdentityContractFactory = await ethers.getContractFactory("IdentityContract");
+    // Deploy PoseidonT3 library first (nested dependency)
+    const PoseidonT3Factory = await ethers.getContractFactory("poseidon-solidity/PoseidonT3.sol:PoseidonT3");
+    const poseidonT3 = await PoseidonT3Factory.deploy();
+    await poseidonT3.waitForDeployment();
+
+    // Deploy IncrementalBinaryTree library with PoseidonT3 linked
+    const IncrementalBinaryTreeFactory = await ethers.getContractFactory("@zk-kit/incremental-merkle-tree.sol/IncrementalBinaryTree.sol:IncrementalBinaryTree", {
+      libraries: {
+        PoseidonT3: await poseidonT3.getAddress()
+      }
+    });
+    const incrementalBinaryTree = await IncrementalBinaryTreeFactory.deploy();
+    await incrementalBinaryTree.waitForDeployment();
+
+    // Deploy Standard Identity Contract with library linked
+    const IdentityContractFactory = await ethers.getContractFactory("IdentityContract", {
+      libraries: {
+        IncrementalBinaryTree: await incrementalBinaryTree.getAddress()
+      }
+    });
     identityContract = await IdentityContractFactory.deploy({ value: ethers.parseEther("10") });
     await identityContract.waitForDeployment();
     await identityContract.setDataContract(owner.address);
 
-    // Deploy ZK Identity Contract
-    const ZKIdentityFactory = await ethers.getContractFactory("ZKIdentity");
-    zkIdentityContract = await ZKIdentityFactory.deploy({ value: ethers.parseEther("10") });
+    // Deploy ZK Identity Contract with library linked
+    const ZKIdentityFactory = await ethers.getContractFactory("ZKIdentity", {
+      libraries: {
+        IncrementalBinaryTree: await incrementalBinaryTree.getAddress()
+      }
+    });
+    zkIdentityContract = await ZKIdentityFactory.deploy();
     await zkIdentityContract.waitForDeployment();
 
     // Deploy Reward Verifier
@@ -77,8 +100,9 @@ describe("Reward Claiming Phase Gas Benchmarks", function () {
     const identityNullifier1 = randomFieldElement();
     const identityCommitment1 = await poseidonHash2(identitySecret1, identityNullifier1);
     const identityCommitmentHex = "0x" + identityCommitment1.toString(16).padStart(64, "0");
-    // For testing, we can use 0 as the poseidon root since the contract will compute its own root
-    await zkIdentityContract.connect(delegate1).registerIdentity(identityCommitmentHex, 0, { value: REGISTRATION_DEPOSIT });
+    const registerTx = await zkIdentityContract.connect(delegate1).registerIdentity(identityCommitmentHex, { value: REGISTRATION_DEPOSIT });
+    const registerReceipt = await registerTx.wait();
+    benchmarkResults.registerIdentityZK = registerReceipt.gasUsed.toString();
   });
 
   describe("ZK: claimReward()", function () {

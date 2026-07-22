@@ -2,7 +2,8 @@ const { expect } = require("chai");
 const { ethers } = require("hardhat");
 const fs = require("fs");
 const path = require("path");
-const { setupIdentityProof } = require("../helpers/identityProofHelper");
+const { setupIdentityProof, setupIdentityProofWithContract } = require("../helpers/identityProofHelper");
+const { randomFieldElement } = require("../helpers/poseidon");
 
 describe("Dispute & Regulation Phase Gas Benchmarks", function () {
   let identityContract, zkIdentityContract, zkDataContract;
@@ -21,15 +22,37 @@ describe("Dispute & Regulation Phase Gas Benchmarks", function () {
   beforeEach(async function () {
     [owner, producer, consumer, delegate1, delegate2, manager1, manager2, manager3] = await ethers.getSigners();
 
-    // Deploy Standard Identity Contract
-    const IdentityContractFactory = await ethers.getContractFactory("IdentityContract");
+    // Deploy PoseidonT3 library first (nested dependency)
+    const PoseidonT3Factory = await ethers.getContractFactory("poseidon-solidity/PoseidonT3.sol:PoseidonT3");
+    const poseidonT3 = await PoseidonT3Factory.deploy();
+    await poseidonT3.waitForDeployment();
+
+    // Deploy IncrementalBinaryTree library with PoseidonT3 linked
+    const IncrementalBinaryTreeFactory = await ethers.getContractFactory("@zk-kit/incremental-merkle-tree.sol/IncrementalBinaryTree.sol:IncrementalBinaryTree", {
+      libraries: {
+        PoseidonT3: await poseidonT3.getAddress()
+      }
+    });
+    const incrementalBinaryTree = await IncrementalBinaryTreeFactory.deploy();
+    await incrementalBinaryTree.waitForDeployment();
+
+    // Deploy Standard Identity Contract with library linked
+    const IdentityContractFactory = await ethers.getContractFactory("IdentityContract", {
+      libraries: {
+        IncrementalBinaryTree: await incrementalBinaryTree.getAddress()
+      }
+    });
     identityContract = await IdentityContractFactory.deploy({ value: ethers.parseEther("10") });
     await identityContract.waitForDeployment();
     await identityContract.setDataContract(owner.address);
 
-    // Deploy ZK Identity Contract
-    const ZKIdentityFactory = await ethers.getContractFactory("ZKIdentity");
-    zkIdentityContract = await ZKIdentityFactory.deploy({ value: ethers.parseEther("10") });
+    // Deploy ZK Identity Contract with library linked
+    const ZKIdentityFactory = await ethers.getContractFactory("ZKIdentity", {
+      libraries: {
+        IncrementalBinaryTree: await incrementalBinaryTree.getAddress()
+      }
+    });
+    zkIdentityContract = await ZKIdentityFactory.deploy();
     await zkIdentityContract.waitForDeployment();
 
     // Deploy ZK Data Contract
@@ -57,12 +80,10 @@ describe("Dispute & Regulation Phase Gas Benchmarks", function () {
     await identityContract.connect(delegate2).registerOrganisation(ipfsCid, { value: REGISTRATION_DEPOSIT });
 
     // Register ZK identities
-    const identityCommitment1 = ethers.keccak256(ethers.toUtf8Bytes("identity1"));
-    const identityCommitment2 = ethers.keccak256(ethers.toUtf8Bytes("identity2"));
-    const poseidonRoot1 = ethers.keccak256(ethers.toUtf8Bytes("root1"));
-    const poseidonRoot2 = ethers.keccak256(ethers.toUtf8Bytes("root2"));
-    await zkIdentityContract.connect(delegate1).registerIdentity(identityCommitment1, poseidonRoot1, { value: REGISTRATION_DEPOSIT });
-    await zkIdentityContract.connect(delegate2).registerIdentity(identityCommitment2, poseidonRoot2, { value: REGISTRATION_DEPOSIT });
+    const identityCommitment1 = randomFieldElement();
+    const identityCommitment2 = randomFieldElement();
+    await zkIdentityContract.connect(delegate1).registerIdentity(identityCommitment1, { value: REGISTRATION_DEPOSIT });
+    await zkIdentityContract.connect(delegate2).registerIdentity(identityCommitment2, { value: REGISTRATION_DEPOSIT });
 
     // Register ZK group managers
     await zkDataContract.connect(manager1).registerZKGroupManager(ethers.keccak256(ethers.toUtf8Bytes("manager1")));
@@ -212,6 +233,40 @@ describe("Dispute & Regulation Phase Gas Benchmarks", function () {
   });
 
   describe("ZK: raiseDisputeZK()", function () {
+    let freshZkIdentityContract;
+
+    beforeEach(async function () {
+      // Deploy a fresh ZKIdentity contract for this test to ensure empty tree
+      const PoseidonT3Factory = await ethers.getContractFactory("poseidon-solidity/PoseidonT3.sol:PoseidonT3");
+      const poseidonT3 = await PoseidonT3Factory.deploy();
+      await poseidonT3.waitForDeployment();
+
+      const IncrementalBinaryTreeFactory = await ethers.getContractFactory("@zk-kit/incremental-merkle-tree.sol/IncrementalBinaryTree.sol:IncrementalBinaryTree", {
+        libraries: {
+          PoseidonT3: await poseidonT3.getAddress()
+        }
+      });
+      const incrementalBinaryTree = await IncrementalBinaryTreeFactory.deploy();
+      await incrementalBinaryTree.waitForDeployment();
+
+      const ZKIdentityFactory = await ethers.getContractFactory("ZKIdentity", {
+        libraries: {
+          IncrementalBinaryTree: await incrementalBinaryTree.getAddress()
+        }
+      });
+      freshZkIdentityContract = await ZKIdentityFactory.deploy();
+      await freshZkIdentityContract.waitForDeployment();
+
+      // Enable testing mode to allow setZkIdentity
+      await zkDataContract.setTestingMode(true);
+
+      // Update zkDataContract to use the fresh ZKIdentity
+      await zkDataContract.setZkIdentity(await freshZkIdentityContract.getAddress());
+
+      // Disable testing mode for accurate gas measurement
+      await zkDataContract.setTestingMode(false);
+    });
+
     it("Benchmark: ZK dispute raising with proof verification", async function () {
       // Setup complete CTI lifecycle
       const accessPolicyIpfsCid = "QmAccessPolicy1234567890abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ";
@@ -236,10 +291,9 @@ describe("Dispute & Regulation Phase Gas Benchmarks", function () {
       const responseIpfsCid = "QmResponse1234567890abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ";
       await zkDataContract.connect(delegate1).provideResponse(1, responseIpfsCid);
 
-      // Generate real ZK proof for dispute raising
+      // Generate real ZK proof for dispute raising first
       const evidenceCid = "QmEvidence1234567890abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ";
       const payoutCommitment = ethers.keccak256(ethers.toUtf8Bytes("payout1"));
-      const identityCommitment = ethers.keccak256(ethers.toUtf8Bytes("identity1"));
       const accuserPayoutCommitment = ethers.keccak256(ethers.toUtf8Bytes("accuserPayout1"));
 
       // Calculate expected actionId using solidityPacked (equivalent to abi.encodePacked)
@@ -252,22 +306,13 @@ describe("Dispute & Regulation Phase Gas Benchmarks", function () {
       console.log(`Expected actionId: ${actionId}`);
       console.log(`Expected actionId as number: ${Number(actionId)}`);
 
-      // Generate real ZK proof and set the root in the contract
-      const proofData = await setupIdentityProof(actionId);
-      
+      // Generate real ZK proof using the helper with fresh contract state
+      const proofData = await setupIdentityProofWithContract(freshZkIdentityContract, actionId);
+
       console.log(`Proof actionId from publicSignals (index 2): ${proofData.pubSignals[2]}`);
       console.log(`Proof actionId as number: ${Number(proofData.pubSignals[2])}`);
       console.log(`Proof root from publicSignals (index 0): ${proofData.pubSignals[0]}`);
       console.log(`Proof root as BigInt: ${proofData.root}`);
-      
-      // Set the Merkle root in the ZKIdentity contract using the pubSignals[0] value
-      // This ensures the root matches what the proof expects
-      const rootFromProof = proofData.pubSignals[0];
-      await zkIdentityContract.setRoot(rootFromProof);
-      
-      // Verify the root was set correctly
-      const isRootSet = await zkIdentityContract.roots(rootFromProof);
-      console.log(`Root set in contract: ${isRootSet}`);
 
       const tx = await zkDataContract.raiseDisputeZK(
         1,
@@ -275,7 +320,7 @@ describe("Dispute & Regulation Phase Gas Benchmarks", function () {
         1,
         evidenceCid,
         payoutCommitment,
-        identityCommitment,
+        proofData.identityCommitment,
         accuserPayoutCommitment,
         proofData.pA,
         proofData.pB,
@@ -296,6 +341,40 @@ describe("Dispute & Regulation Phase Gas Benchmarks", function () {
   });
 
   describe("ZK: voteOnDisputeZK()", function () {
+    let freshZkIdentityContract;
+
+    beforeEach(async function () {
+      // Deploy a fresh ZKIdentity contract for this test to ensure empty tree
+      const PoseidonT3Factory = await ethers.getContractFactory("poseidon-solidity/PoseidonT3.sol:PoseidonT3");
+      const poseidonT3 = await PoseidonT3Factory.deploy();
+      await poseidonT3.waitForDeployment();
+
+      const IncrementalBinaryTreeFactory = await ethers.getContractFactory("@zk-kit/incremental-merkle-tree.sol/IncrementalBinaryTree.sol:IncrementalBinaryTree", {
+        libraries: {
+          PoseidonT3: await poseidonT3.getAddress()
+        }
+      });
+      const incrementalBinaryTree = await IncrementalBinaryTreeFactory.deploy();
+      await incrementalBinaryTree.waitForDeployment();
+
+      const ZKIdentityFactory = await ethers.getContractFactory("ZKIdentity", {
+        libraries: {
+          IncrementalBinaryTree: await incrementalBinaryTree.getAddress()
+        }
+      });
+      freshZkIdentityContract = await ZKIdentityFactory.deploy();
+      await freshZkIdentityContract.waitForDeployment();
+
+      // Enable testing mode to allow setZkIdentity
+      await zkDataContract.setTestingMode(true);
+
+      // Update zkDataContract to use the fresh ZKIdentity
+      await zkDataContract.setZkIdentity(await freshZkIdentityContract.getAddress());
+
+      // Disable testing mode for accurate gas measurement
+      await zkDataContract.setTestingMode(false);
+    });
+
     it("Benchmark: ZK voting with proof verification", async function () {
       // Setup complete CTI lifecycle and ZK dispute
       const accessPolicyIpfsCid = "QmAccessPolicy1234567890abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ";
@@ -323,7 +402,6 @@ describe("Dispute & Regulation Phase Gas Benchmarks", function () {
       // Raise ZK dispute with real proof
       const evidenceCid = "QmEvidence1234567890abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ";
       const payoutCommitment = ethers.keccak256(ethers.toUtf8Bytes("payout1"));
-      const identityCommitment = ethers.keccak256(ethers.toUtf8Bytes("identity1"));
       const accuserPayoutCommitment = ethers.keccak256(ethers.toUtf8Bytes("accuserPayout1"));
 
       const disputeActionId = ethers.keccak256(ethers.solidityPacked(
@@ -331,10 +409,7 @@ describe("Dispute & Regulation Phase Gas Benchmarks", function () {
         [1, 1, "DISPUTE"]
       ));
 
-      const disputeProofData = await setupIdentityProof(disputeActionId);
-      
-      // Set the Merkle root in the ZKIdentity contract so the proof validates
-      await zkIdentityContract.setRoot(disputeProofData.root);
+      const disputeProofData = await setupIdentityProofWithContract(freshZkIdentityContract, disputeActionId);
 
       await zkDataContract.raiseDisputeZK(
         1,
@@ -342,7 +417,7 @@ describe("Dispute & Regulation Phase Gas Benchmarks", function () {
         1,
         evidenceCid,
         payoutCommitment,
-        identityCommitment,
+        disputeProofData.identityCommitment,
         accuserPayoutCommitment,
         disputeProofData.pA,
         disputeProofData.pB,
@@ -356,10 +431,7 @@ describe("Dispute & Regulation Phase Gas Benchmarks", function () {
         [1, 1, "VOTE"]
       ));
 
-      const voteProofData = await setupIdentityProof(voteActionId);
-      
-      // Set the Merkle root in the ZKIdentity contract so the proof validates
-      await zkIdentityContract.setRoot(voteProofData.root);
+      const voteProofData = await setupIdentityProofWithContract(freshZkIdentityContract, voteActionId);
 
       const tx = await zkDataContract.voteOnDisputeZK(1, true, voteProofData.pA, voteProofData.pB, voteProofData.pC, voteProofData.pubSignals);
       const receipt = await tx.wait();

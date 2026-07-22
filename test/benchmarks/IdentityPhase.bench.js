@@ -1,6 +1,6 @@
 const { expect } = require("chai");
 const { ethers } = require("hardhat");
-const { poseidonHash } = require("../helpers/poseidon");
+const { poseidonHash, randomFieldElement } = require("../helpers/poseidon");
 
 describe("Identity & Registration Phase Gas Benchmarks", function () {
   let identityContract, zkIdentityContract;
@@ -10,13 +10,35 @@ describe("Identity & Registration Phase Gas Benchmarks", function () {
   beforeEach(async function () {
     [owner, org1, org2, org3, org4, org5] = await ethers.getSigners();
 
-    // Deploy Standard Identity Contract
-    const IdentityContractFactory = await ethers.getContractFactory("IdentityContract");
+    // Deploy PoseidonT3 library first (nested dependency)
+    const PoseidonT3Factory = await ethers.getContractFactory("poseidon-solidity/PoseidonT3.sol:PoseidonT3");
+    const poseidonT3 = await PoseidonT3Factory.deploy();
+    await poseidonT3.waitForDeployment();
+
+    // Deploy IncrementalBinaryTree library with PoseidonT3 linked
+    const IncrementalBinaryTreeFactory = await ethers.getContractFactory("@zk-kit/incremental-merkle-tree.sol/IncrementalBinaryTree.sol:IncrementalBinaryTree", {
+      libraries: {
+        PoseidonT3: await poseidonT3.getAddress()
+      }
+    });
+    const incrementalBinaryTree = await IncrementalBinaryTreeFactory.deploy();
+    await incrementalBinaryTree.waitForDeployment();
+
+    // Deploy Standard Identity Contract with library linked
+    const IdentityContractFactory = await ethers.getContractFactory("IdentityContract", {
+      libraries: {
+        IncrementalBinaryTree: await incrementalBinaryTree.getAddress()
+      }
+    });
     identityContract = await IdentityContractFactory.deploy({ value: ethers.parseEther("10") });
     await identityContract.waitForDeployment();
 
-    // Deploy ZK Identity Contract
-    const ZKIdentityFactory = await ethers.getContractFactory("ZKIdentity");
+    // Deploy ZK Identity Contract with library linked
+    const ZKIdentityFactory = await ethers.getContractFactory("ZKIdentity", {
+      libraries: {
+        IncrementalBinaryTree: await incrementalBinaryTree.getAddress()
+      }
+    });
     zkIdentityContract = await ZKIdentityFactory.deploy();
     await zkIdentityContract.waitForDeployment();
   });
@@ -67,7 +89,7 @@ describe("Identity & Registration Phase Gas Benchmarks", function () {
 
   describe("ZK: registerIdentity()", function () {
     it("Benchmark: Single identity registration with Merkle tree insertion", async function () {
-      const identityCommitment = await poseidonHash(BigInt(ethers.keccak256(ethers.toUtf8Bytes("identity1"))));
+      const identityCommitment = randomFieldElement();
       
       const tx = await zkIdentityContract.connect(org1).registerIdentity(identityCommitment, { 
         value: REGISTRATION_DEPOSIT 
@@ -82,7 +104,7 @@ describe("Identity & Registration Phase Gas Benchmarks", function () {
 
       for (let i = 0; i < 5; i++) {
         const org = [org1, org2, org3, org4, org5][i];
-        const identityCommitment = await poseidonHash(BigInt(ethers.keccak256(ethers.toUtf8Bytes(`identity${i + 1}`))));
+        const identityCommitment = randomFieldElement();
         
         const tx = await zkIdentityContract.connect(org).registerIdentity(identityCommitment, { 
           value: REGISTRATION_DEPOSIT 
@@ -97,7 +119,7 @@ describe("Identity & Registration Phase Gas Benchmarks", function () {
     });
 
     it("Benchmark: Gas overhead of Merkle tree insertion vs mapping storage", async function () {
-      const identityCommitment = await poseidonHash(BigInt(ethers.keccak256(ethers.toUtf8Bytes("identity1"))));
+      const identityCommitment = randomFieldElement();
       
       const tx = await zkIdentityContract.connect(org1).registerIdentity(identityCommitment, { 
         value: REGISTRATION_DEPOSIT 
@@ -105,14 +127,14 @@ describe("Identity & Registration Phase Gas Benchmarks", function () {
       const receipt = await tx.wait();
       
       console.log(`Merkle tree insertion gas cost: ${receipt.gasUsed.toString()}`);
-      console.log(`Breakdown: Commitment mapping + Tree leaf insertion + Root update + Event emission`);
+      console.log(`Breakdown: Commitment mapping + IdentityTree.insert() + Root update + Event emission`);
     });
   });
 
   describe("Comparative Analysis: Standard vs ZK Registration", function () {
     it("Direct comparison: Single registration", async function () {
       const ipfsCid = "QmTest1234567890abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ";
-      const identityCommitment = await poseidonHash(BigInt(ethers.keccak256(ethers.toUtf8Bytes("identity1"))));
+      const identityCommitment = randomFieldElement();
 
       // Standard registration
       const standardTx = await identityContract.connect(org1).registerOrganisation(ipfsCid, { 
@@ -135,7 +157,7 @@ describe("Identity & Registration Phase Gas Benchmarks", function () {
       console.log(`Standard registerOrganisation(): ${standardGas.toString()} gas`);
       console.log(`ZK registerIdentity(): ${zkGas.toString()} gas`);
       console.log(`ZK Overhead: ${overhead.toString()} gas (${overheadPercent.toFixed(2)}%)`);
-      console.log(`Merkle tree insertion overhead: ${overhead.toString()} gas`);
+      console.log(`IdentityTree insertion overhead: ${overhead.toString()} gas`);
     });
 
     it("Statistical comparison: 10 registrations each", async function () {
@@ -156,7 +178,7 @@ describe("Identity & Registration Phase Gas Benchmarks", function () {
         standardGasCosts.push(standardReceipt.gasUsed);
 
         // ZK registration (use different commitments)
-        const identityCommitment = await poseidonHash(BigInt(ethers.keccak256(ethers.toUtf8Bytes(`identity${i + 100}`))));
+        const identityCommitment = randomFieldElement();
         const zkTx = await zkIdentityContract.connect(signers[i + 5]).registerIdentity(identityCommitment, {
           value: REGISTRATION_DEPOSIT
         });

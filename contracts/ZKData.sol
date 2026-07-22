@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
+import "./IdentityTree.sol";
+
 interface IZKIdentity {
     function verifyProof(
         uint[2] calldata _pA,
@@ -8,8 +10,7 @@ interface IZKIdentity {
         uint[2] calldata _pC,
         uint[3] calldata _pubSignals
     ) external view returns (bool);
-    function roots(uint256 root) external view returns(bool);
-    function nextLeafIndex() external view returns(uint256);
+    function identityTree() external view returns (address);
     function deposits(uint256 commitment) external view returns(uint256);
     function slashAndReward(
         address _defendant,
@@ -349,7 +350,7 @@ contract ZKDataContract {
         // Check fees...
         
         // 1. Get max index from Identity contract
-        uint256 maxIndex = zkIdentity.nextLeafIndex();
+        uint256 maxIndex = IdentityTree(zkIdentity.identityTree()).getNumberOfLeaves();
         require(maxIndex > 0, "No delegates registered");
 
         // 2. Randomly select a leaf index (Pseudo-randomness for demo)
@@ -395,7 +396,7 @@ contract ZKDataContract {
         require(input[2] == _requestId % FIELD_ORDER, "Invalid Action ID"); 
         
         // 2. Validate Merkle Root
-        require(zkIdentity.roots(input[0]), "Invalid Merkle Root");
+        require(IdentityTree(zkIdentity.identityTree()).getRoot() == input[0], "Invalid Merkle Root");
 
         // 3. Verify ZK Proof via Identity Contract
         require(_verifyZKProof(a, b, c, input), "Invalid ZK Proof");
@@ -670,7 +671,7 @@ contract ZKDataContract {
         require(input[2] == uint256(expectedActionId) % FIELD_ORDER, "Invalid Action ID");
         
         // 2. Validate Merkle Root
-        require(zkIdentity.roots(input[0]), "Invalid Merkle Root");
+        require(IdentityTree(zkIdentity.identityTree()).getRoot() == input[0], "Invalid Merkle Root");
 
         // 3. Verify ZK Proof
         require(_verifyZKProof(a, b, c, input), "Invalid ZK Proof");
@@ -801,7 +802,7 @@ contract ZKDataContract {
         require(input[2] == uint256(expectedActionId) % FIELD_ORDER, "Invalid Action ID");
         
         // 2. Validate Merkle Root
-        require(zkIdentity.roots(input[0]), "Invalid Merkle Root");
+        require(IdentityTree(zkIdentity.identityTree()).getRoot() == input[0], "Invalid Merkle Root");
 
         // 3. Verify ZK Proof
         require(_verifyZKProof(a, b, c, input), "Invalid ZK Proof");
@@ -916,7 +917,16 @@ contract ZKDataContract {
     function setTestingMode(bool _enabled) external {
         testingMode = _enabled;
     }
-    
+
+    /**
+     * @dev Test helper to set a new ZKIdentity contract (for benchmarking with fresh instances)
+     * Only callable in testing mode
+     */
+    function setZkIdentity(address _zkIdentity) external {
+        require(testingMode, "Not in testing mode");
+        zkIdentity = IZKIdentity(_zkIdentity);
+    }
+
     /**
      * @dev Test helper to deposit rewards directly for benchmarking
      * Only callable in testing mode
