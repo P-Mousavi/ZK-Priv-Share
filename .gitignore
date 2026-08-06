@@ -12,7 +12,6 @@ coverage/
 .env.local
 .env.*.local
 artifacts/
-benchmark-results/
 cache/
 gas-report.txt
 reward.sym

@@ -3,8 +3,9 @@
 require("dotenv").config();
 const fs = require("fs");
 const path = require("path");
-const solc = require("solc");
 const { ethers } = require("ethers");
+const hre = require("hardhat");
+const { execSync } = require("child_process");
 const { syncConfig } = require("./syncConfig");
 const {
     ROOT,
@@ -143,130 +144,42 @@ async function main() {
     console.log(`📄 Loading contract: ${contractFile}`);
 
     // ----------------------------
-    // Load & compile contract
+    // Load & compile contract using Hardhat
     // ----------------------------
     const source = fs.readFileSync(contractPath, "utf8");
     const contractName = extractContractName(source, contractFile);
 
     console.log(`📦 Compiling contract: ${contractName}`);
 
-    // Read all contract files for imports
-    const contractsDir = path.join(ROOT, "contracts");
+    // Use Hardhat's built-in compilation
+    await hre.run('compile');
+
+    // Get the compiled contract from artifacts
+    const artifactsDir = 'artifacts';
+    const artifactPath = path.join(ROOT, artifactsDir, 'contracts', contractFile.replace('.sol', '.sol'), `${contractName}.json`);
     
-    // Build sources object with all required files
-    // Use both the import path and normalized path as keys to handle solc's path resolution
-    const sources = {};
-
-    // Recursively collect all imports
-    function collectImports(filePath, sourceKey, collected = new Set()) {
-        if (collected.has(sourceKey)) return;
-        collected.add(sourceKey);
-        
-        const fileContent = fs.readFileSync(filePath, "utf8");
-        sources[sourceKey] = { content: fileContent };
-        
-        // Also add normalized version (without ./) as solc might normalize paths
-        const normalizedKey = sourceKey.replace(/^\.\//, "");
-        if (normalizedKey !== sourceKey) {
-            sources[normalizedKey] = { content: fileContent };
-        }
-        
-        const importRegex = /import\s+["']([^"']+)["']/g;
-        let match;
-        
-        while ((match = importRegex.exec(fileContent)) !== null) {
-            const importPath = match[1];
-            let resolvedPath;
-            let importSourceKey;
-            
-            // Handle relative imports
-            if (importPath.startsWith("./")) {
-                const baseDir = path.dirname(filePath);
-                resolvedPath = path.resolve(baseDir, importPath.replace("./", ""));
-                // Keep the import path as the source key (as it appears in the import statement)
-                importSourceKey = importPath;
-            } else {
-                resolvedPath = path.join(contractsDir, importPath);
-                importSourceKey = importPath;
-            }
-            
-            if (fs.existsSync(resolvedPath) && !collected.has(importSourceKey)) {
-                collectImports(resolvedPath, importSourceKey, collected);
-            }
-        }
-    }
-
-    // Start collecting from the main contract
-    // Use the contract file name as the source key
-    collectImports(contractPath, contractFile);
-
-    const input = {
-        language: "Solidity",
-        sources: sources,
-        settings: {
-            outputSelection: {
-                "*": {
-                    "*": ["abi", "evm.bytecode"],
-                },
-            },
-            optimizer: {
-                enabled: true,
-                runs: 200
-            },
-            viaIR: true
-        },
-    };
-
-    // Use compileStandardWrapper for better import handling
-    const compileStandardWrapper = solc.compileStandardWrapper || solc.compile;
-    const output = JSON.parse(compileStandardWrapper(JSON.stringify(input)));
-
-    if (output.errors) {
-        const errors = output.errors.filter(e => e.severity === "error");
-        if (errors.length > 0) {
-            for (const error of errors) {
-                console.error(error.formattedMessage);
-            }
-            throw new Error("Compilation failed");
-        }
-        // Show warnings but don't fail
-        const warnings = output.errors.filter(e => e.severity === "warning");
-        for (const warning of warnings) {
-            console.warn(warning.formattedMessage);
-        }
-    }
-
-    const compiled = output.contracts[contractFile][contractName];
-
-    if (!compiled) {
-        console.error(`Error: Contract ${contractName} not found in compiled output`);
-        console.error("Available contracts:", Object.keys(output.contracts[contractFile] || {}));
+    if (!fs.existsSync(artifactPath)) {
+        console.error(`Error: Contract artifact not found at ${artifactPath}`);
         process.exit(1);
     }
 
-    const abi = compiled.abi;
-    const bytecode = compiled.evm.bytecode.object;
+    const artifact = JSON.parse(fs.readFileSync(artifactPath, 'utf8'));
+    const abi = artifact.abi;
+    const bytecode = artifact.bytecode;
 
     console.log("✔ Compilation successful");
 
     // ----------------------------
     // Connect to local Hardhat node
     // ----------------------------
-    const provider = new ethers.JsonRpcProvider("http://127.0.0.1:8545");
+    const [deployer] = await hre.ethers.getSigners();
+    const deployerAddress = await deployer.getAddress();
 
-    // Check if private key is set
-    if (!process.env.PRIVATE_KEY) {
-        throw new Error("PRIVATE_KEY not found in .env file");
-    }
-
-    const wallet = new ethers.Wallet(process.env.PRIVATE_KEY, provider);
-    const deployer = await wallet.getAddress();
-
-    console.log("🔗 Connected to: http://127.0.0.1:8545");
-    console.log("👤 Deploying from:", deployer);
+    console.log("🔗 Connected to Hardhat network");
+    console.log("👤 Deploying from:", deployerAddress);
 
     // Check balance
-    const balance = await provider.getBalance(deployer);
+    const balance = await hre.ethers.provider.getBalance(deployerAddress);
     console.log("💰 Balance:", ethers.formatEther(balance), "ETH");
 
     if (balance === 0n) {
@@ -274,9 +187,97 @@ async function main() {
     }
 
     // ----------------------------
-    // Deploy contract
+    // Deploy contract using Hardhat
     // ----------------------------
-    const factory = new ethers.ContractFactory(abi, bytecode, wallet);
+    let factory;
+    
+    // Check if bytecode contains library placeholders
+    const hasLibraryPlaceholders = bytecode.includes('$__');
+    
+    if (hasLibraryPlaceholders) {
+        console.log("🔗 Contract requires library linking");
+        let poseidonAddress, ibtAddress;
+
+        // Check if PoseidonT3 is already deployed and valid
+        try {
+            poseidonAddress = loadDeployedAddress("PoseidonT3");
+            const code = await hre.ethers.provider.getCode(poseidonAddress);
+            if (code === "0x") {
+                console.log(`⚠️  PoseidonT3 at ${poseidonAddress} has no code, redeploying...`);
+                throw new Error("Invalid library address");
+            }
+            console.log(`♻️  Reusing existing PoseidonT3 at: ${poseidonAddress}`);
+        } catch (e) {
+            // Deploy PoseidonT3 first using Hardhat
+            console.log("📦 Deploying PoseidonT3 library...");
+            const PoseidonT3Factory = await hre.ethers.getContractFactory("poseidon-solidity/PoseidonT3.sol:PoseidonT3");
+            const poseidonT3 = await PoseidonT3Factory.deploy();
+            await poseidonT3.waitForDeployment();
+            poseidonAddress = await poseidonT3.getAddress();
+            
+            // Save PoseidonT3 address
+            const poseidonData = {
+                contractName: "PoseidonT3",
+                contractFile: "PoseidonT3.sol",
+                address: poseidonAddress,
+                deployedAt: new Date().toISOString(),
+                network: DEPLOYMENTS_NETWORK
+            };
+            const poseidonFilePath = deploymentRecordPath("PoseidonT3");
+            fs.mkdirSync(DEPLOYMENTS_DIR, { recursive: true });
+            fs.writeFileSync(poseidonFilePath, JSON.stringify(poseidonData, null, 2));
+            console.log(`✔ PoseidonT3 deployed at: ${poseidonAddress}`);
+        }
+
+        // Check if IncrementalBinaryTree is already deployed and valid
+        try {
+            ibtAddress = loadDeployedAddress("IncrementalBinaryTree");
+            const code = await hre.ethers.provider.getCode(ibtAddress);
+            if (code === "0x") {
+                console.log(`⚠️  IncrementalBinaryTree at ${ibtAddress} has no code, redeploying...`);
+                throw new Error("Invalid library address");
+            }
+            console.log(`♻️  Reusing existing IncrementalBinaryTree at: ${ibtAddress}`);
+        } catch (e) {
+            // Deploy IncrementalBinaryTree with PoseidonT3 linked using Hardhat
+            console.log("📦 Deploying IncrementalBinaryTree library...");
+            const IncrementalBinaryTreeFactory = await hre.ethers.getContractFactory("@zk-kit/incremental-merkle-tree.sol/IncrementalBinaryTree.sol:IncrementalBinaryTree", {
+                libraries: {
+                    PoseidonT3: poseidonAddress
+                }
+            });
+            const incrementalBinaryTree = await IncrementalBinaryTreeFactory.deploy();
+            await incrementalBinaryTree.waitForDeployment();
+            ibtAddress = await incrementalBinaryTree.getAddress();
+            
+            // Save IncrementalBinaryTree address
+            const ibtData = {
+                contractName: "IncrementalBinaryTree",
+                contractFile: "IncrementalBinaryTree.sol",
+                address: ibtAddress,
+                deployedAt: new Date().toISOString(),
+                network: DEPLOYMENTS_NETWORK
+            };
+            const ibtFilePath = deploymentRecordPath("IncrementalBinaryTree");
+            fs.mkdirSync(DEPLOYMENTS_DIR, { recursive: true });
+            fs.writeFileSync(ibtFilePath, JSON.stringify(ibtData, null, 2));
+            console.log(`✔ IncrementalBinaryTree deployed at: ${ibtAddress}`);
+        }
+
+        // Deploy contract with IncrementalBinaryTree linked using Hardhat
+        factory = await hre.ethers.getContractFactory(contractName, {
+            libraries: {
+                IncrementalBinaryTree: ibtAddress
+            }
+        });
+    } else {
+        // Use fully qualified name for contracts with duplicate names
+        if (contractName === "Groth16Verifier") {
+            factory = await hre.ethers.getContractFactory("contracts/RewardVerifier.sol:Groth16Verifier");
+        } else {
+            factory = await hre.ethers.getContractFactory(contractName);
+        }
+    }
 
     // Determine constructor arguments
     let constructorArgs = [];
@@ -288,7 +289,7 @@ async function main() {
         
         if (contractName === "ZKDataContract") {
             const zkIdentityAddress = loadDeployedAddress("ZKIdentity");
-            const rewardVerifierAddress = loadDeployedAddress("RewardVerifier");
+            const rewardVerifierAddress = loadDeployedAddress("Groth16Verifier");
             const { identityContract, threshold } = loadDeploymentConfig();
             const initialManagers = loadInitialManagers();
 

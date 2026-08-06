@@ -27,7 +27,8 @@ class ReportGenerator {
       dispute: {},
       reward: {},
       deployment: {},
-      offchain: {}
+      offchain: {},
+      proofVerification: {}
     };
   }
 
@@ -65,29 +66,47 @@ class ReportGenerator {
 
   async collectAllResults() {
     console.log(`\n=== Collecting Benchmark Results ===`);
-    
+
     // Load deployment results if available
     const deploymentPath = path.join(this.resultsDir, "deployment-results.json");
     if (fs.existsSync(deploymentPath)) {
       this.benchmarkResults.deployment = JSON.parse(fs.readFileSync(deploymentPath, "utf8"));
     }
-    
+
     // Load off-chain results if available
     const offchainPath = path.join(this.resultsDir, "offchain-proving-results.json");
     if (fs.existsSync(offchainPath)) {
       this.benchmarkResults.offchain = JSON.parse(fs.readFileSync(offchainPath, "utf8"));
     }
-    
+
+    // Load identity results if available
+    const identityPath = path.join(this.resultsDir, "identity-results.json");
+    if (fs.existsSync(identityPath)) {
+      this.benchmarkResults.identity = JSON.parse(fs.readFileSync(identityPath, "utf8"));
+    }
+
     // Load CTI results if available
     const ctiPath = path.join(this.resultsDir, "cti-results.json");
     if (fs.existsSync(ctiPath)) {
       this.benchmarkResults.cti = JSON.parse(fs.readFileSync(ctiPath, "utf8"));
     }
 
+    // Load dispute results if available
+    const disputePath = path.join(this.resultsDir, "dispute-results.json");
+    if (fs.existsSync(disputePath)) {
+      this.benchmarkResults.dispute = JSON.parse(fs.readFileSync(disputePath, "utf8"));
+    }
+
     // Load reward results if available
     const rewardPath = path.join(this.resultsDir, "reward-results.json");
     if (fs.existsSync(rewardPath)) {
       this.benchmarkResults.reward = JSON.parse(fs.readFileSync(rewardPath, "utf8"));
+    }
+
+    // Load proof verification results if available
+    const proofVerificationPath = path.join(this.resultsDir, "proof-verification-results.json");
+    if (fs.existsSync(proofVerificationPath)) {
+      this.benchmarkResults.proofVerification = JSON.parse(fs.readFileSync(proofVerificationPath, "utf8"));
     }
   }
 
@@ -135,7 +154,16 @@ class ReportGenerator {
     markdown += `### Comparison: registerOrganisation() vs registerIdentity()\n\n`;
     markdown += `| Metric | Standard | ZK | Overhead |\n`;
     markdown += `|--------|----------|-----|----------|\n`;
-    if (identityData && zkIdentityData) {
+
+    // Use identity benchmark results if available
+    const registerOrgGas = this.benchmarkResults.identity.registerOrganisation;
+    const registerIdGas = this.benchmarkResults.identity.registerIdentity;
+
+    if (registerOrgGas && registerIdGas) {
+      const overhead = parseInt(registerIdGas) - parseInt(registerOrgGas);
+      const percent = ((overhead / parseInt(registerOrgGas)) * 100).toFixed(0);
+      markdown += `| Single Registration | ${registerOrgGas} gas | ${registerIdGas} gas | ${overhead} gas (${percent}% increase) |\n`;
+    } else if (identityData && zkIdentityData) {
       const overhead = parseInt(zkIdentityData.gas) - parseInt(identityData.gas);
       const percent = ((overhead / parseInt(identityData.gas)) * 100).toFixed(0);
       markdown += `| Single Registration | ${identityData.gas} gas | ${zkIdentityData.gas} gas | ${overhead} gas (${percent}% increase) |\n`;
@@ -144,12 +172,19 @@ class ReportGenerator {
     }
     markdown += `| Storage Type | Mapping (address → Org) | Mapping (commitment → deposit) + Merkle Tree | N/A |\n`;
     markdown += `| Privacy Level | None (public addresses) | High (commitment-based) | N/A |\n\n`;
-    
+
     markdown += `### Analysis\n\n`;
     markdown += `The ZK registration overhead primarily comes from:\n`;
-    markdown += `- Merkle tree insertion (requires actual measurement)\n`;
-    markdown += `- Root computation and storage (requires actual measurement)\n`;
-    markdown += `- Additional commitment mapping (requires actual measurement)\n\n`;
+    if (registerOrgGas && registerIdGas) {
+      const overhead = parseInt(registerIdGas) - parseInt(registerOrgGas);
+      markdown += `- Merkle tree insertion: ${overhead} gas overhead\n`;
+      markdown += `- Root computation and storage\n`;
+      markdown += `- Additional commitment mapping\n\n`;
+    } else {
+      markdown += `- Merkle tree insertion (requires actual measurement)\n`;
+      markdown += `- Root computation and storage (requires actual measurement)\n`;
+      markdown += `- Additional commitment mapping (requires actual measurement)\n\n`;
+    }
     
     markdown += `### Deployment Comparison\n\n`;
     markdown += `| Contract | Deployment Gas | Bytecode Size | EIP-170 Compliance |\n`;
@@ -214,7 +249,24 @@ class ReportGenerator {
     
     markdown += `### ZK Proof Verification Breakdown\n\n`;
     markdown += `The primary overhead in provideResponseZK() comes from zk-SNARK verification:\n`;
-    markdown += `- Groth16 proof verification (requires actual measurement)\n`;
+
+    // Use proof verification results if available
+    const proofResults = Array.isArray(this.benchmarkResults.proofVerification.results) ? this.benchmarkResults.proofVerification.results : [];
+    const identityProofResult = proofResults.find(r => r.circuit === "identity");
+    const rewardProofResult = proofResults.find(r => r.circuit === "reward");
+
+    if (identityProofResult) {
+      markdown += `- Identity proof verification: ${identityProofResult.executionGas} execution gas (${identityProofResult.transactionGas} total gas)\n`;
+    } else {
+      markdown += `- Identity proof verification (requires actual measurement)\n`;
+    }
+
+    if (rewardProofResult) {
+      markdown += `- Reward proof verification: ${rewardProofResult.executionGas} execution gas (${rewardProofResult.transactionGas} total gas)\n`;
+    } else {
+      markdown += `- Reward proof verification (requires actual measurement)\n`;
+    }
+
     markdown += `- Merkle root validation (requires actual measurement)\n`;
     markdown += `- Nullifier check (SSTORE) (requires actual measurement)\n`;
     markdown += `- Reward tree minting (requires actual measurement)\n\n`;
@@ -551,28 +603,93 @@ class ReportGenerator {
 
   generateCSVReport() {
     let csv = "Phase,Operation,Standard Gas,ZK Gas,Overhead Gas,Overhead %,Privacy Level\n";
-    
-    csv += "Identity & Registration,registerOrganisation,N/A,N/A,N/A,N/A,High\n";
-    csv += "Identity & Registration,registerIdentity,N/A,N/A,N/A,N/A,High\n";
-    csv += "CTI Submission,shareCti,N/A,N/A,N/A,N/A,None\n";
-    csv += "CTI Consumption,provideResponse,N/A,N/A,N/A,N/A,None\n";
-    csv += "CTI Consumption,provideResponseZK,N/A,N/A,N/A,N/A,Complete\n";
-    csv += "CTI Complete Cycle,All,N/A,N/A,N/A,N/A,Complete\n";
-    csv += "Dispute,raiseDispute,N/A,N/A,N/A,N/A,Complete\n";
-    csv += "Dispute,voteOnDispute (no settlement),N/A,N/A,N/A,N/A,Complete\n";
-    csv += "Dispute,voteOnDispute (with settlement),N/A,N/A,N/A,N/A,Complete\n";
-    csv += "Dispute Complete,All (threshold=2),N/A,N/A,N/A,N/A,Complete\n";
 
-    const depositReward = this.benchmarkResults.reward && this.benchmarkResults.reward.depositReward;
-    const claimReward = this.benchmarkResults.reward && this.benchmarkResults.reward.claimReward;
+    // Identity & Registration
+    const registerOrgGas = this.benchmarkResults.identity.registerOrganisation;
+    const registerIdGas = this.benchmarkResults.identity.registerIdentity;
+
+    if (registerOrgGas && registerIdGas) {
+      const overhead = parseInt(registerIdGas) - parseInt(registerOrgGas);
+      const percent = ((overhead / parseInt(registerOrgGas)) * 100).toFixed(2);
+      csv += `Identity & Registration,registerOrganisation,${registerOrgGas},N/A,N/A,N/A,None\n`;
+      csv += `Identity & Registration,registerIdentity,N/A,${registerIdGas},${overhead},${percent},High\n`;
+    } else {
+      csv += "Identity & Registration,registerOrganisation,N/A,N/A,N/A,N/A,None\n";
+      csv += "Identity & Registration,registerIdentity,N/A,N/A,N/A,N/A,High\n";
+    }
+
+    // CTI Submission & Consumption
+    const shareCti = this.benchmarkResults.cti.shareCti;
+    const provideResponse = this.benchmarkResults.cti.provideResponse;
+    const requestAccess = this.benchmarkResults.cti.requestAccess;
+    const provideResponseZK = this.benchmarkResults.cti.provideResponseZK;
+
+    csv += `CTI Submission,shareCti,${shareCti || "N/A"},${shareCti || "N/A"},0,0,None\n`;
+    csv += `CTI Consumption,provideResponse,${provideResponse || "N/A"},N/A,N/A,N/A,None\n`;
+    csv += `CTI Consumption,requestAccess,N/A,${requestAccess || "N/A"},N/A,N/A,Complete\n`;
+    csv += `CTI Consumption,provideResponseZK,N/A,${provideResponseZK || "N/A"},N/A,N/A,Complete\n`;
+
+    if (provideResponse && requestAccess && provideResponseZK) {
+      const standardCycle = parseInt(provideResponse) + parseInt(requestAccess);
+      const zkCycle = parseInt(provideResponseZK);
+      const overhead = zkCycle - standardCycle;
+      const percent = ((overhead / standardCycle) * 100).toFixed(2);
+      csv += `CTI Complete Cycle,All,${standardCycle},${zkCycle},${overhead},${percent},Complete\n`;
+    } else {
+      csv += "CTI Complete Cycle,All,N/A,N/A,N/A,N/A,Complete\n";
+    }
+
+    // Dispute & Regulation
+    const raiseDispute = this.benchmarkResults.dispute.raiseDispute;
+    const voteOnDispute = this.benchmarkResults.dispute.voteOnDispute;
+    const raiseDisputeZK = this.benchmarkResults.dispute.raiseDisputeZK;
+    const voteOnDisputeZK = this.benchmarkResults.dispute.voteOnDisputeZK;
+
+    if (raiseDispute && raiseDisputeZK) {
+      const overhead = parseInt(raiseDisputeZK) - parseInt(raiseDispute);
+      const percent = ((overhead / parseInt(raiseDispute)) * 100).toFixed(2);
+      csv += `Dispute,raiseDispute,${raiseDispute},${raiseDisputeZK},${overhead},${percent},Complete\n`;
+    } else {
+      csv += `Dispute,raiseDispute,${raiseDispute || "N/A"},${raiseDisputeZK || "N/A"},N/A,N/A,Complete\n`;
+    }
+
+    if (voteOnDispute && voteOnDisputeZK) {
+      const overhead = parseInt(voteOnDisputeZK) - parseInt(voteOnDispute);
+      const percent = ((overhead / parseInt(voteOnDispute)) * 100).toFixed(2);
+      csv += `Dispute,voteOnDispute,${voteOnDispute},${voteOnDisputeZK},${overhead},${percent},Complete\n`;
+    } else {
+      csv += `Dispute,voteOnDispute,${voteOnDispute || "N/A"},${voteOnDisputeZK || "N/A"},N/A,N/A,Complete\n`;
+    }
+
+    // Reward Claiming
+    const depositReward = this.benchmarkResults.reward.depositReward;
+    const claimReward = this.benchmarkResults.reward.claimReward;
     const rewardTotal = (depositReward && claimReward) ? (parseInt(depositReward) + parseInt(claimReward)) : "N/A";
 
     csv += "Reward,Direct Payment,N/A,N/A,N/A,N/A,None\n";
     csv += `Reward,depositReward (minting),N/A,${depositReward || "N/A"},N/A,N/A,Complete\n`;
     csv += `Reward,claimReward,N/A,${claimReward || "N/A"},N/A,N/A,Complete\n`;
     csv += `Reward Complete,All,N/A,${rewardTotal},N/A,N/A,Complete\n`;
+
+    // Proof Verification
+    const proofResults = Array.isArray(this.benchmarkResults.proofVerification.results) ? this.benchmarkResults.proofVerification.results : [];
+    const identityProofResult = proofResults.find(r => r.circuit === "identity");
+    const rewardProofResult = proofResults.find(r => r.circuit === "reward");
+
+    if (identityProofResult) {
+      csv += `Proof Verification,Identity verifyProof,N/A,${identityProofResult.executionGas},N/A,N/A,Complete\n`;
+    } else {
+      csv += "Proof Verification,Identity verifyProof,N/A,N/A,N/A,N/A,Complete\n";
+    }
+
+    if (rewardProofResult) {
+      csv += `Proof Verification,Reward verifyProof,N/A,${rewardProofResult.executionGas},N/A,N/A,Complete\n`;
+    } else {
+      csv += "Proof Verification,Reward verifyProof,N/A,N/A,N/A,N/A,Complete\n";
+    }
+
     csv += "Complete Lifecycle,All Phases,N/A,N/A,N/A,N/A,Complete\n";
-    
+
     return csv;
   }
 

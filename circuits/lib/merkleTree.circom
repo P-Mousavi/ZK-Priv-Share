@@ -3,6 +3,7 @@ pragma circom 2.0.0;
 include "../../node_modules/circomlib/circuits/poseidon.circom";
 
 // Custom Merkle Tree Inclusion Proof template using Poseidon hash
+// Adapted to work with IncrementalBinaryTree's zero-value approach
 // pathIndices[i] = 0 means current node is on the left, 1 means on the right
 template MerkleTreeInclusionProof(levels) {
     signal input leaf;
@@ -10,6 +11,11 @@ template MerkleTreeInclusionProof(levels) {
     signal input pathIndices[levels];
     
     signal output root;
+    signal output debugLevels[levels + 1];
+    signal output debugLeaf;
+    signal output debugLeft;
+    signal output debugRight;
+    signal output debugHash;
     
     component hashers[levels];
     
@@ -28,6 +34,7 @@ template MerkleTreeInclusionProof(levels) {
     // For each level, hash the current node with its sibling
     // If pathIndices[i] == 0: hash(level[i], pathElements[i])
     // If pathIndices[i] == 1: hash(pathElements[i], level[i])
+    // pathElements can be zero values (Z_0, Z_1, etc.) for empty positions in IncrementalBinaryTree
     for (var i = 0; i < levels; i++) {
         // Compute 1 - pathIndices[i]
         oneMinusIndex[i] <== 1 - pathIndices[i];
@@ -51,5 +58,9 @@ template MerkleTreeInclusionProof(levels) {
     }
     
     root <== level[levels];
+    for (var i = 0; i <= levels; i++)
+    {
+        debugLevels[i] <== level[i];
+    }
 }
 

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.4;
 
-import {PoseidonT3} from "poseidon-solidity/PoseidonT3.sol";
+import {PoseidonT3} from "../crypto/PoseidonT3.sol";
 
 // Each incremental tree has certain properties and data that will
 // be used to add new leaves.

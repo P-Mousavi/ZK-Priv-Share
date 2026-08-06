@@ -34,7 +34,26 @@ describe("Deployment Gas Cost & Bytecode Size Benchmarks", function () {
 
   describe("Standard Contract Deployment", function () {
     it("Benchmark: IdentityContract deployment", async function () {
-      const IdentityContractFactory = await ethers.getContractFactory("IdentityContract");
+      // Deploy PoseidonT3 library first (nested dependency)
+      const PoseidonT3Factory = await ethers.getContractFactory("poseidon-solidity/PoseidonT3.sol:PoseidonT3");
+      const poseidonT3 = await PoseidonT3Factory.deploy();
+      await poseidonT3.waitForDeployment();
+
+      // Deploy IncrementalBinaryTree library with PoseidonT3 linked
+      const IncrementalBinaryTreeFactory = await ethers.getContractFactory("@zk-kit/incremental-merkle-tree.sol/IncrementalBinaryTree.sol:IncrementalBinaryTree", {
+        libraries: {
+          PoseidonT3: await poseidonT3.getAddress()
+        }
+      });
+      const incrementalBinaryTree = await IncrementalBinaryTreeFactory.deploy();
+      await incrementalBinaryTree.waitForDeployment();
+
+      // Deploy IdentityContract with library linked
+      const IdentityContractFactory = await ethers.getContractFactory("IdentityContract", {
+        libraries: {
+          IncrementalBinaryTree: await incrementalBinaryTree.getAddress()
+        }
+      });
       const bytecodeSize = getBytecodeSize(IdentityContractFactory);
       
       const contract = await IdentityContractFactory.deploy({ value: ethers.parseEther("10") });
@@ -192,28 +211,50 @@ describe("Deployment Gas Cost & Bytecode Size Benchmarks", function () {
     it("Analyze all contract bytecode sizes", async function () {
       console.log(`\n=== Complete Bytecode Size Analysis ===`);
       
+      // Deploy libraries for contracts that need them
+      const PoseidonT3Factory = await ethers.getContractFactory("poseidon-solidity/PoseidonT3.sol:PoseidonT3");
+      const poseidonT3 = await PoseidonT3Factory.deploy();
+      await poseidonT3.waitForDeployment();
+
+      const IncrementalBinaryTreeFactory = await ethers.getContractFactory("@zk-kit/incremental-merkle-tree.sol/IncrementalBinaryTree.sol:IncrementalBinaryTree", {
+        libraries: {
+          PoseidonT3: await poseidonT3.getAddress()
+        }
+      });
+      const incrementalBinaryTree = await IncrementalBinaryTreeFactory.deploy();
+      await incrementalBinaryTree.waitForDeployment();
+
       const contracts = [
-        "IdentityContract",
-        "ZKIdentity",
-        "contracts/Verifier.sol:Groth16Verifier",
-        "contracts/RewardVerifier.sol:Groth16Verifier",
-        "ZKDataContract"
+        { name: "IdentityContract", needsLibrary: true },
+        { name: "ZKIdentity", needsLibrary: true },
+        { name: "contracts/Verifier.sol:Groth16Verifier", needsLibrary: false },
+        { name: "contracts/RewardVerifier.sol:Groth16Verifier", needsLibrary: false },
+        { name: "ZKDataContract", needsLibrary: false }
       ];
 
-      for (const contractName of contracts) {
+      for (const contract of contracts) {
         try {
-          const factory = await ethers.getContractFactory(contractName);
+          let factory;
+          if (contract.needsLibrary) {
+            factory = await ethers.getContractFactory(contract.name, {
+              libraries: {
+                IncrementalBinaryTree: await incrementalBinaryTree.getAddress()
+              }
+            });
+          } else {
+            factory = await ethers.getContractFactory(contract.name);
+          }
           const bytecodeSize = getBytecodeSize(factory);
           const compliance = bytecodeSize <= 24576 ? "PASS" : "FAIL";
           const percentage = ((bytecodeSize / 24576) * 100).toFixed(2);
           
-          console.log(`${contractName}:`);
+          console.log(`${contract.name}:`);
           console.log(`  Bytecode size: ${bytecodeSize} bytes`);
           console.log(`  EIP-170 limit: 24,576 bytes`);
           console.log(`  Usage: ${percentage}%`);
           console.log(`  Compliance: ${compliance}`);
         } catch (error) {
-          console.log(`${contractName}: Not found or error - ${error.message}`);
+          console.log(`${contract.name}: Not found or error - ${error.message}`);
         }
       }
     });
@@ -221,10 +262,31 @@ describe("Deployment Gas Cost & Bytecode Size Benchmarks", function () {
     it("Compare standard vs ZK contract sizes", async function () {
       console.log(`\n=== Standard vs ZK Contract Size Comparison ===`);
       
-      const IdentityFactory = await ethers.getContractFactory("IdentityContract");
+      // Deploy libraries for contracts that need them
+      const PoseidonT3Factory = await ethers.getContractFactory("poseidon-solidity/PoseidonT3.sol:PoseidonT3");
+      const poseidonT3 = await PoseidonT3Factory.deploy();
+      await poseidonT3.waitForDeployment();
+
+      const IncrementalBinaryTreeFactory = await ethers.getContractFactory("@zk-kit/incremental-merkle-tree.sol/IncrementalBinaryTree.sol:IncrementalBinaryTree", {
+        libraries: {
+          PoseidonT3: await poseidonT3.getAddress()
+        }
+      });
+      const incrementalBinaryTree = await IncrementalBinaryTreeFactory.deploy();
+      await incrementalBinaryTree.waitForDeployment();
+      
+      const IdentityFactory = await ethers.getContractFactory("IdentityContract", {
+        libraries: {
+          IncrementalBinaryTree: await incrementalBinaryTree.getAddress()
+        }
+      });
       const identitySize = getBytecodeSize(IdentityFactory);
       
-      const ZKIdentityFactory = await ethers.getContractFactory("ZKIdentity");
+      const ZKIdentityFactory = await ethers.getContractFactory("ZKIdentity", {
+        libraries: {
+          IncrementalBinaryTree: await incrementalBinaryTree.getAddress()
+        }
+      });
       const zkIdentitySize = getBytecodeSize(ZKIdentityFactory);
       
       const sizeDiff = zkIdentitySize - identitySize;

@@ -27,6 +27,9 @@ npx hardhat test test/benchmarks/RewardPhase.bench.js
 
 # Deployment Analysis
 npx hardhat test test/benchmarks/Deployment.bench.js
+
+# Direct Groth16 proof verification
+npx hardhat test test/benchmarks/ProofVerification.bench.js
 ```
 
 ### 2. Run All Benchmarks
@@ -53,6 +56,7 @@ node scripts/benchmarks/generateReport.js
 
 Results are saved to:
 - `benchmark-results/deployment-results.json` - Deployment gas costs
+- `benchmark-results/proof-verification-results.json` - Direct identity and reward `verifyProof()` gas costs
 - `benchmark-results/offchain-proving-results.json` - Off-chain proving times
 - `reports/GasComparisonReport.md` - Comprehensive markdown report
 - `reports/GasComparisonReport.csv` - CSV data for analysis

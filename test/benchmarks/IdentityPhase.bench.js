@@ -1,11 +1,21 @@
 const { expect } = require("chai");
 const { ethers } = require("hardhat");
 const { poseidonHash, randomFieldElement } = require("../helpers/poseidon");
+const fs = require("fs");
+const path = require("path");
 
 describe("Identity & Registration Phase Gas Benchmarks", function () {
   let identityContract, zkIdentityContract;
   let owner, org1, org2, org3, org4, org5;
   const REGISTRATION_DEPOSIT = ethers.parseEther("1");
+
+  // Store benchmark results
+  const benchmarkResults = {
+    registerOrganisation: null,
+    registerIdentity: null,
+    identityContractDeployment: null,
+    zkIdentityDeployment: null
+  };
 
   beforeEach(async function () {
     [owner, org1, org2, org3, org4, org5] = await ethers.getSigners();
@@ -46,12 +56,13 @@ describe("Identity & Registration Phase Gas Benchmarks", function () {
   describe("Standard: registerOrganisation()", function () {
     it("Benchmark: Single organisation registration", async function () {
       const ipfsCid = "QmTest1234567890abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ";
-      
-      const tx = await identityContract.connect(org1).registerOrganisation(ipfsCid, { 
-        value: REGISTRATION_DEPOSIT 
+
+      const tx = await identityContract.connect(org1).registerOrganisation(ipfsCid, {
+        value: REGISTRATION_DEPOSIT
       });
       const receipt = await tx.wait();
-      
+
+      benchmarkResults.registerOrganisation = receipt.gasUsed.toString();
       console.log(`Standard registerOrganisation() gas: ${receipt.gasUsed.toString()}`);
     });
 
@@ -90,12 +101,13 @@ describe("Identity & Registration Phase Gas Benchmarks", function () {
   describe("ZK: registerIdentity()", function () {
     it("Benchmark: Single identity registration with Merkle tree insertion", async function () {
       const identityCommitment = randomFieldElement();
-      
-      const tx = await zkIdentityContract.connect(org1).registerIdentity(identityCommitment, { 
-        value: REGISTRATION_DEPOSIT 
+
+      const tx = await zkIdentityContract.connect(org1).registerIdentity(identityCommitment, {
+        value: REGISTRATION_DEPOSIT
       });
       const receipt = await tx.wait();
-      
+
+      benchmarkResults.registerIdentity = receipt.gasUsed.toString();
       console.log(`ZK registerIdentity() gas: ${receipt.gasUsed.toString()}`);
     });
 
@@ -201,29 +213,91 @@ describe("Identity & Registration Phase Gas Benchmarks", function () {
 
   describe("Deployment Gas Costs", function () {
     it("Benchmark: IdentityContract deployment", async function () {
-      const IdentityContractFactory = await ethers.getContractFactory("IdentityContract");
+      // Deploy PoseidonT3 library first (nested dependency)
+      const PoseidonT3Factory = await ethers.getContractFactory("poseidon-solidity/PoseidonT3.sol:PoseidonT3");
+      const poseidonT3 = await PoseidonT3Factory.deploy();
+      await poseidonT3.waitForDeployment();
+
+      // Deploy IncrementalBinaryTree library with PoseidonT3 linked
+      const IncrementalBinaryTreeFactory = await ethers.getContractFactory("@zk-kit/incremental-merkle-tree.sol/IncrementalBinaryTree.sol:IncrementalBinaryTree", {
+        libraries: {
+          PoseidonT3: await poseidonT3.getAddress()
+        }
+      });
+      const incrementalBinaryTree = await IncrementalBinaryTreeFactory.deploy();
+      await incrementalBinaryTree.waitForDeployment();
+
+      // Deploy IdentityContract with library linked
+      const IdentityContractFactory = await ethers.getContractFactory("IdentityContract", {
+        libraries: {
+          IncrementalBinaryTree: await incrementalBinaryTree.getAddress()
+        }
+      });
       const contract = await IdentityContractFactory.deploy({ value: ethers.parseEther("10") });
       const receipt = await contract.deploymentTransaction().wait();
 
+      benchmarkResults.identityContractDeployment = receipt.gasUsed.toString();
       console.log(`IdentityContract deployment gas: ${receipt.gasUsed.toString()}`);
     });
 
     it("Benchmark: ZKIdentity deployment (includes Verifier.sol)", async function () {
-      const ZKIdentityFactory = await ethers.getContractFactory("ZKIdentity");
+      // Deploy PoseidonT3 library first (nested dependency)
+      const PoseidonT3Factory = await ethers.getContractFactory("poseidon-solidity/PoseidonT3.sol:PoseidonT3");
+      const poseidonT3 = await PoseidonT3Factory.deploy();
+      await poseidonT3.waitForDeployment();
+
+      // Deploy IncrementalBinaryTree library with PoseidonT3 linked
+      const IncrementalBinaryTreeFactory = await ethers.getContractFactory("@zk-kit/incremental-merkle-tree.sol/IncrementalBinaryTree.sol:IncrementalBinaryTree", {
+        libraries: {
+          PoseidonT3: await poseidonT3.getAddress()
+        }
+      });
+      const incrementalBinaryTree = await IncrementalBinaryTreeFactory.deploy();
+      await incrementalBinaryTree.waitForDeployment();
+
+      // Deploy ZKIdentity with library linked
+      const ZKIdentityFactory = await ethers.getContractFactory("ZKIdentity", {
+        libraries: {
+          IncrementalBinaryTree: await incrementalBinaryTree.getAddress()
+        }
+      });
       const contract = await ZKIdentityFactory.deploy();
       const receipt = await contract.deploymentTransaction().wait();
 
+      benchmarkResults.zkIdentityDeployment = receipt.gasUsed.toString();
       console.log(`ZKIdentity deployment gas: ${receipt.gasUsed.toString()}`);
       console.log(`Note: Includes Groth16Verifier contract deployment overhead`);
     });
 
     it("Comparative deployment analysis", async function () {
-      const IdentityContractFactory = await ethers.getContractFactory("IdentityContract");
+      // Deploy PoseidonT3 library first (nested dependency)
+      const PoseidonT3Factory = await ethers.getContractFactory("poseidon-solidity/PoseidonT3.sol:PoseidonT3");
+      const poseidonT3 = await PoseidonT3Factory.deploy();
+      await poseidonT3.waitForDeployment();
+
+      // Deploy IncrementalBinaryTree library with PoseidonT3 linked
+      const IncrementalBinaryTreeFactory = await ethers.getContractFactory("@zk-kit/incremental-merkle-tree.sol/IncrementalBinaryTree.sol:IncrementalBinaryTree", {
+        libraries: {
+          PoseidonT3: await poseidonT3.getAddress()
+        }
+      });
+      const incrementalBinaryTree = await IncrementalBinaryTreeFactory.deploy();
+      await incrementalBinaryTree.waitForDeployment();
+
+      const IdentityContractFactory = await ethers.getContractFactory("IdentityContract", {
+        libraries: {
+          IncrementalBinaryTree: await incrementalBinaryTree.getAddress()
+        }
+      });
       const standardContract = await IdentityContractFactory.deploy({ value: ethers.parseEther("10") });
       const standardReceipt = await standardContract.deploymentTransaction().wait();
       const standardGas = standardReceipt.gasUsed;
 
-      const ZKIdentityFactory = await ethers.getContractFactory("ZKIdentity");
+      const ZKIdentityFactory = await ethers.getContractFactory("ZKIdentity", {
+        libraries: {
+          IncrementalBinaryTree: await incrementalBinaryTree.getAddress()
+        }
+      });
       const zkContract = await ZKIdentityFactory.deploy();
       const zkReceipt = await zkContract.deploymentTransaction().wait();
       const zkGas = zkReceipt.gasUsed;
@@ -236,5 +310,17 @@ describe("Identity & Registration Phase Gas Benchmarks", function () {
       console.log(`ZKIdentity: ${zkGas.toString()} gas`);
       console.log(`ZK deployment overhead: ${overhead.toString()} gas (${overheadPercent.toFixed(2)}%)`);
     });
+  });
+
+  after(function () {
+    // Save benchmark results to JSON file
+    const resultsDir = path.join(__dirname, "../../benchmark-results");
+    if (!fs.existsSync(resultsDir)) {
+      fs.mkdirSync(resultsDir, { recursive: true });
+    }
+
+    const resultsPath = path.join(resultsDir, "identity-results.json");
+    fs.writeFileSync(resultsPath, JSON.stringify(benchmarkResults, null, 2));
+    console.log(`\nIdentity benchmark results saved to: ${resultsPath}`);
   });
 });

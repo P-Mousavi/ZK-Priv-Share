@@ -14,6 +14,9 @@ module.exports = {
       viaIR: false
     }
   },
+  remappings: [
+    "@zk-kit/incremental-merkle-tree.sol/=node_modules/@zk-kit/incremental-merkle-tree.sol/"
+  ],
   networks: {
     hardhat: {
       chainId: 31337

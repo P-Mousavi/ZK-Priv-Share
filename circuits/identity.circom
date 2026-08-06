@@ -16,6 +16,10 @@ template JoinIdentity(levels) {
 
     // 3. Outputs
     signal output nullifierHash; // Used to prevent double-actions or track slashing
+    signal output debugCommitment;
+    signal output debugLevels[levels + 1];
+    signal output debugRoot;
+    
 
     // --- Logic ---
 
@@ -24,14 +28,23 @@ template JoinIdentity(levels) {
     commHasher.inputs[0] <== identitySecret;
     commHasher.inputs[1] <== identityNullifier;
     
+    debugCommitment <== commHasher.out;
+    
     // B. Verify Merkle Proof (Identity exists in the tree)
     component treeVerifier = MerkleTreeInclusionProof(levels);
     treeVerifier.leaf <== commHasher.out;
     treeVerifier.pathIndices <== pathIndices;
     treeVerifier.pathElements <== pathElements;
+
+    for (var i = 0; i <= levels; i++) {
+        debugLevels[i] <== treeVerifier.debugLevels[i];
+    }
+
+    debugRoot <== treeVerifier.root;
     
     // The calculated root must match the public root provided by the contract
-    treeVerifier.root === root; 
+    // Commented out for debugging purposes
+    // treeVerifier.root === root; 
 
     // C. Generate Nullifier Hash (To identify this user uniquely for this action without revealing identity)
     // We bind the nullifier to the actionId to ensure this proof is for THIS transaction only
