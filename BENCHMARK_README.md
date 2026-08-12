@@ -2,6 +2,22 @@
 
 Comprehensive gas cost comparison between Standard Priv-Share and ZK-Priv-Share implementations using Hardhat v2.
 
+## CTI-to-reward linkability benchmark
+
+Run the observer-model benchmark with:
+
+```bash
+npm run benchmark:linkability
+```
+
+It writes `benchmark-results/linkability-results.json` and evaluates the public chain evidence available to a passive observer: transaction senders, logs, event order, and public note denomination.
+
+- Scenario A: the response transaction and delegate payment are synchronous, so the participant is directly observable.
+- Scenario B: a relayed ZK response mints one deferred note, followed by unrelated events and a relayed ZK claim. Address reuse is removed, but one public denomination still produces a singleton candidate set.
+- Scenario C: the response mints ten identical fixed-denomination notes before the deferred claim. The claim has ten same-denomination candidates, demonstrating the anonymity-set benefit.
+
+The benchmark uses Hardhat's existing 20 local accounts; no account configuration change is required. It deploys an accept-all verifier only on the in-process Hardhat network so the benchmark measures event linkability without the cost and latency of generating Groth16 proofs. Production verification remains covered by the real reward-proof tests.
+
 ## Installation
 
 ```bash

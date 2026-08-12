@@ -8,6 +8,7 @@
     "test:contracts": "./node_modules/.bin/hardhat test test/contracts/*.test.js",
     "test:circuits": "npx ts-mocha test/circuits/*.test.ts --timeout 300000",
     "test:all": "npm run test:contracts && npm run test:circuits",
+    "benchmark:linkability": "hardhat test test/benchmarks/Linkability.bench.js",
     "compile": "./node_modules/.bin/hardhat compile",
     "build": "npm run compile"
   },
