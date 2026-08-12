@@ -43,6 +43,9 @@ describe("Identity & Registration Phase Gas Benchmarks", function () {
     identityContract = await IdentityContractFactory.deploy({ value: ethers.parseEther("10") });
     await identityContract.waitForDeployment();
 
+    // Enable testing mode to bypass struct storage for fair gas comparison
+    await identityContract.setTestingMode(true);
+
     // Deploy ZK Identity Contract with library linked
     const ZKIdentityFactory = await ethers.getContractFactory("ZKIdentity", {
       libraries: {

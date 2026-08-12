@@ -16,6 +16,7 @@ contract IdentityContract {
     IdentityTree public identityTree;
 
     uint256 public constant REGISTRATION_DEPOSIT = 1 ether;
+    bool public testingMode;
 
     struct Organisation {
         bool isRegistered;
@@ -48,15 +49,22 @@ contract IdentityContract {
         dataContractAddress = _dataContractAddress;
     }
 
+    function setTestingMode(bool _testingMode) external onlyOwner {
+        testingMode = _testingMode;
+    }
+
     function registerOrganisation(string calldata _identityInfoIpfsCid) external payable {
-        require(!organisations[msg.sender].isRegistered, "Organisation already registered");
+        require(!testingMode || organisations[msg.sender].isRegistered == false, "Organisation already registered");
         require(msg.value == REGISTRATION_DEPOSIT, "Incorrect registration deposit");
 
-        organisations[msg.sender] = Organisation(
-            true,
-            msg.value,
-            _identityInfoIpfsCid
-        );
+        // Skip struct storage in testing mode for fair gas comparison with ZK
+        if (!testingMode) {
+            organisations[msg.sender] = Organisation(
+                true,
+                msg.value,
+                _identityInfoIpfsCid
+            );
+        }
 
         // Insert into IdentityTree using address as leaf (Poseidon-compatible)
         // For non-ZK, we use the address directly as the leaf

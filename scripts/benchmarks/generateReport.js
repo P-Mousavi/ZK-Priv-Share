@@ -145,6 +145,18 @@ class ReportGenerator {
     markdown += `This report provides a comprehensive gas cost analysis comparing the standard Priv-Share implementation against the zero-knowledge enhanced ZK-Priv-Share variant. The benchmarks cover all phases of the CTI lifecycle: Identity & Registration, CTI Submission & Consumption, Dispute & Regulation, and Reward Claiming.\n\n`;
     
     markdown += `### Key Findings\n\n`;
+
+    // Use proof verification results if available
+    const proofResults = Array.isArray(this.benchmarkResults.proofVerification.results) ? this.benchmarkResults.proofVerification.results : [];
+    const identityProofResult = proofResults.find(r => r.circuit === "identity");
+    const rewardProofResult = proofResults.find(r => r.circuit === "reward");
+
+    if (identityProofResult && rewardProofResult) {
+      markdown += `- **Identity Proof Verification:** ${identityProofResult.executionGas} execution gas (${identityProofResult.transactionGas} total gas)\n`;
+      markdown += `- **Reward Proof Verification:** ${rewardProofResult.executionGas} execution gas (${rewardProofResult.transactionGas} total gas)\n`;
+    } else {
+      markdown += `- **Proof Verification Costs:** N/A (requires actual measurement)\n`;
+    }
     markdown += `- **Average Gas Overhead:** N/A (requires actual measurement)\n`;
     markdown += `- **Privacy Premium:** N/A (requires actual measurement)\n`;
     markdown += `- **Deployment Overhead:** N/A (requires actual measurement)\n`;
@@ -250,11 +262,6 @@ class ReportGenerator {
     markdown += `### ZK Proof Verification Breakdown\n\n`;
     markdown += `The primary overhead in provideResponseZK() comes from zk-SNARK verification:\n`;
 
-    // Use proof verification results if available
-    const proofResults = Array.isArray(this.benchmarkResults.proofVerification.results) ? this.benchmarkResults.proofVerification.results : [];
-    const identityProofResult = proofResults.find(r => r.circuit === "identity");
-    const rewardProofResult = proofResults.find(r => r.circuit === "reward");
-
     if (identityProofResult) {
       markdown += `- Identity proof verification: ${identityProofResult.executionGas} execution gas (${identityProofResult.transactionGas} total gas)\n`;
     } else {
@@ -321,7 +328,12 @@ class ReportGenerator {
     
     markdown += `### Privacy Premium Analysis\n\n`;
     markdown += `The dispute phase shows significant privacy overhead because:\n`;
-    markdown += `- Each vote requires ZK proof verification\n`;
+
+    if (identityProofResult) {
+      markdown += `- Identity proof verification: ${identityProofResult.executionGas} execution gas (${identityProofResult.transactionGas} total gas)\n`;
+    } else {
+      markdown += `- Each vote requires ZK proof verification\n`;
+    }
     markdown += `- Nullifier management adds storage costs\n`;
     markdown += `- Anonymous slashing requires additional tree operations\n\n`;
     
@@ -361,10 +373,15 @@ class ReportGenerator {
     markdown += `- Complete payout anonymity\n`;
     markdown += `- Flexible claiming timeline\n`;
     markdown += `- Fresh recipient addresses break linkage\n\n`;
-    
+
     markdown += `**Costs:**\n`;
     markdown += `- Additional transaction required\n`;
-    markdown += `- ZK proof verification for each claim\n`;
+
+    if (rewardProofResult) {
+      markdown += `- Reward proof verification: ${rewardProofResult.executionGas} execution gas (${rewardProofResult.transactionGas} total gas)\n`;
+    } else {
+      markdown += `- ZK proof verification for each claim\n`;
+    }
     markdown += `- Reward tree management overhead\n\n`;
     
     markdown += `### Financial Trade-off\n\n`;
@@ -540,14 +557,26 @@ class ReportGenerator {
     markdown += `   - CTI Submission & Consumption: N/A (requires actual measurement)\n`;
     markdown += `   - Dispute & Regulation: N/A (requires actual measurement)\n`;
     markdown += `   - Reward Claiming: N/A (requires actual measurement)\n\n`;
-    
-    markdown += `2. **Privacy Guarantees:**\n`;
+
+    // Add proof verification costs to academic metrics
+    if (identityProofResult && rewardProofResult) {
+      markdown += `2. **Proof Verification Costs (Measured):**\n`;
+      markdown += `   - Identity circuit: ${identityProofResult.executionGas} execution gas (${identityProofResult.transactionGas} total gas)\n`;
+      markdown += `   - Reward circuit: ${rewardProofResult.executionGas} execution gas (${rewardProofResult.transactionGas} total gas)\n\n`;
+      markdown += `3. **Privacy Guarantees:**\n`;
+    } else {
+      markdown += `2. **Privacy Guarantees:**\n`;
+    }
     markdown += `   - Identity: Anonymous registration via commitments\n`;
     markdown += `   - CTI Access: Anonymous request-response via ZK proofs\n`;
     markdown += `   - Dispute: Anonymous voting via nullifiers\n`;
     markdown += `   - Rewards: Anonymous claiming via fresh addresses\n\n`;
-    
-    markdown += `3. **Cost-Benefit Conclusion:**\n`;
+
+    if (identityProofResult && rewardProofResult) {
+      markdown += `4. **Cost-Benefit Conclusion:**\n`;
+    } else {
+      markdown += `3. **Cost-Benefit Conclusion:**\n`;
+    }
     markdown += `   - Average gas overhead: N/A (requires actual measurement)\n`;
     markdown += `   - Privacy level: Complete anonymity\n`;
     markdown += `   - Acceptability: High for privacy-critical applications\n`;
