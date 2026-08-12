@@ -35,6 +35,9 @@ npx hardhat test test/benchmarks/IdentityPhase.bench.js
 # Identity-registration scalability (10, 50, and 100 identities; 5 runs each)
 npm run benchmark:identity-scalability
 
+# Reward-note activity and candidate-set accumulation (low/medium/high activity)
+npm run benchmark:reward-activity
+
 # CTI Submission & Consumption Phase
 npx hardhat test test/benchmarks/CTIPhase.bench.js
 
@@ -75,6 +78,7 @@ node scripts/benchmarks/generateReport.js
 
 Results are saved to:
 - `benchmark-results/identity-registration-scalability-results.json` - Five-run identity-registration gas summaries at 10, 50, and 100 identities
+- `benchmark-results/reward-note-activity-results.json` - Controlled reward-note rates and estimated time to 5, 10, and 20 candidates
 - `benchmark-results/deployment-results.json` - Deployment gas costs
 - `benchmark-results/proof-verification-results.json` - Direct identity and reward `verifyProof()` gas costs
 - `benchmark-results/offchain-proving-results.json` - Off-chain proving times

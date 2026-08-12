@@ -519,6 +519,12 @@ Run the identity-registration scalability benchmark (five independent runs at
 npm run benchmark:identity-scalability
 ```
 
+Model controlled reward-note activity and the expected wait for 5, 10, or 20
+same-denomination candidate notes:
+```bash
+npm run benchmark:reward-activity
+```
+
 The identity tree has depth 7 (128 leaves), and identities are unique by their
 commitments rather than their transaction senders. The benchmark therefore uses
 one funded Hardhat account with distinct commitment values, and writes results

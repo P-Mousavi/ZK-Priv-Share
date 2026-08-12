@@ -10,6 +10,7 @@
     "test:all": "npm run test:contracts && npm run test:circuits",
     "benchmark:linkability": "hardhat test test/benchmarks/Linkability.bench.js",
     "benchmark:identity-scalability": "hardhat test test/benchmarks/IdentityRegistrationScalability.bench.js",
+    "benchmark:reward-activity": "hardhat test test/benchmarks/RewardNoteActivity.bench.js",
     "compile": "./node_modules/.bin/hardhat compile",
     "build": "npm run compile"
   },

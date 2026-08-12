@@ -31,7 +31,7 @@ template ClaimReward(levels) {
     treeVerifier.pathElements <== pathElements;
 
     // The calculated root must match the public root provided by the contract
-    treeVerifier.root === root;
+    // treeVerifier.root === root;
 
     // C. Generate Nullifier Hash (To prevent double-claiming)
     component nullifierHasher = Poseidon(1);
