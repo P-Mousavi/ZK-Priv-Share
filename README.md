@@ -513,6 +513,24 @@ Run only circuit tests:
 npm run test:circuits
 ```
 
+Run the identity-registration scalability benchmark (five independent runs at
+10, 50, and 100 identities):
+```bash
+npm run benchmark:identity-scalability
+```
+
+The identity tree has depth 7 (128 leaves), and identities are unique by their
+commitments rather than their transaction senders. The benchmark therefore uses
+one funded Hardhat account with distinct commitment values, and writes results
+to `benchmark-results/identity-registration-scalability-results.json`.
+
+Because the identity circuit now uses the same depth, regenerate its witness,
+proving key, and Solidity verifier before deploying the updated identity flow:
+```bash
+node scripts/generateMerkleTreePoseidon.js
+bash scripts/build.sh -c identity -i input.json
+```
+
 ### Test Coverage
 
 **Circuit Tests:**

@@ -32,6 +32,9 @@ npm install
 # Identity & Registration Phase
 npx hardhat test test/benchmarks/IdentityPhase.bench.js
 
+# Identity-registration scalability (10, 50, and 100 identities; 5 runs each)
+npm run benchmark:identity-scalability
+
 # CTI Submission & Consumption Phase
 npx hardhat test test/benchmarks/CTIPhase.bench.js
 
@@ -71,6 +74,7 @@ node scripts/benchmarks/generateReport.js
 ## Benchmark Results
 
 Results are saved to:
+- `benchmark-results/identity-registration-scalability-results.json` - Five-run identity-registration gas summaries at 10, 50, and 100 identities
 - `benchmark-results/deployment-results.json` - Deployment gas costs
 - `benchmark-results/proof-verification-results.json` - Direct identity and reward `verifyProof()` gas costs
 - `benchmark-results/offchain-proving-results.json` - Off-chain proving times

@@ -72,11 +72,11 @@ async function generateIdentityTree(identities) {
   const leaves = identities.map(id => BigInt(id.commitment));
   
   // Pad with random elements if needed to reach power of 2
-  while (leaves.length < 32 && (leaves.length & (leaves.length - 1)) !== 0) {
+  while (leaves.length < 128 && (leaves.length & (leaves.length - 1)) !== 0) {
     leaves.push(randomFieldElement());
   }
   
-  const { root, proofs } = await createMerkleTree(leaves, 5);
+  const { root, proofs } = await createMerkleTree(leaves, 7);
   
   // Map proofs to identities
   const identityProofs = identities.map((identity, index) => ({

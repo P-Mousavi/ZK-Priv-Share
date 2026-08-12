@@ -6,7 +6,10 @@ import "./libraries/IncrementalBinaryTree.sol";
 contract IdentityTree {
     using IncrementalBinaryTree for IncrementalTreeData;
 
-    uint256 public constant DEPTH = 5;
+    // A depth-5 binary tree holds only 32 identities. Registration scalability
+    // benchmarks cover up to 100 identities, so retain a little headroom while
+    // keeping the tree and the identity circuit on the same depth.
+    uint256 public constant DEPTH = 7;
     IncrementalTreeData internal tree;
 
     event LeafInserted(uint256 indexed leaf, uint256 indexed index);

@@ -7,7 +7,7 @@ const { createMerkleTree } = require("../helpers/merkle");
 
 describe("Identity Circuit", () => {
   let circuit: any;
-  const LEVELS = 5;
+  const LEVELS = 7;
 
   before(async () => {
     const circuitPath = path.join(__dirname, "../../circuits/identity.circom");
@@ -158,7 +158,7 @@ describe("Identity Circuit", () => {
       const commitment = await poseidonHash2(identitySecret, identityNullifier);
       
       // Create tree with many leaves
-      const leaves = Array(32).fill(0n).map(() => randomFieldElement());
+      const leaves = Array(128).fill(0n).map(() => randomFieldElement());
       leaves[0] = commitment;
       
       const { root, proofs } = await createMerkleTree(leaves, LEVELS);

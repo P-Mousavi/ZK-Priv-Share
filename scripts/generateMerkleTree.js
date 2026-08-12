@@ -112,7 +112,7 @@ class PoseidonMerkleTree {
 }
 
 async function generateMerkleTree() {
-    const TREE_DEPTH = 5;
+    const TREE_DEPTH = 7;
     
     // Initialize Poseidon hash function
     const poseidon = await buildPoseidon();
@@ -215,4 +215,3 @@ generateMerkleTree()
         console.error("❌ Error generating Merkle tree:", error);
         process.exit(1);
     });
-

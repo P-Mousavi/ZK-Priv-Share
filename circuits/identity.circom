@@ -55,4 +55,4 @@ template JoinIdentity(levels) {
     nullifierHash <== nullifierHasher.out;
 }
 
-component main {public [root, actionId]} = JoinIdentity(5);
+component main {public [root, actionId]} = JoinIdentity(7);
