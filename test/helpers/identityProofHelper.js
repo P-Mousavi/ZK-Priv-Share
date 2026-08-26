@@ -194,7 +194,9 @@ async function setupIdentityProofWithContract(zkIdentityContract, actionId) {
   // Generate proof using the contract's root and JS tree proof
   const proofData = await generateIdentityProofForAction(
     { identitySecret, identityNullifier, commitment: identityCommitmentHex },
-    jsTree.root,
+    // The root is public but temporarily unconstrained in the circuit. Bind
+    // the proof to the on-chain root so the contract's root check still holds.
+    contractTreeRoot,
     { pathElements: merkleProof.siblings, pathIndices: merkleProof.pathIndices },
     actionIdBigInt
   );

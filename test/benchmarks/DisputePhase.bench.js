@@ -70,8 +70,7 @@ describe("Dispute & Regulation Phase Gas Benchmarks", function () {
     // Update IdentityContract to allow ZKDataContract to call slashAndReward
     await identityContract.setDataContract(await zkDataContract.getAddress());
 
-    // Enable testing mode for ZKIdentity contract to allow setting Merkle roots
-    await zkIdentityContract.setTestingMode(true);
+    await zkIdentityContract.setTestingMode(false);
 
     // Register organisations
     const ipfsCid = "QmTest1234567890abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ";
@@ -307,31 +306,12 @@ describe("Dispute & Regulation Phase Gas Benchmarks", function () {
       console.log(`Expected actionId: ${actionId}`);
       console.log(`Expected actionId as number: ${Number(actionId)}`);
 
-      // Enable testing mode on fresh ZKIdentity contract to bypass proof verification
-      await freshZkIdentityContract.setTestingMode(true);
-      
       // Generate real ZK proof using the helper with fresh contract state
       const proofData = await setupIdentityProofWithContract(freshZkIdentityContract, actionId);
 
-      console.log(`Proof actionId from publicSignals (index 2): ${proofData.pubSignals[2]}`);
-      console.log(`Proof actionId as number: ${Number(proofData.pubSignals[2])}`);
-      console.log(`Proof root from publicSignals (index 0): ${proofData.pubSignals[0]}`);
-      console.log(`Proof root as BigInt: ${proofData.root}`);
+      const input = proofData.pubSignals;
 
-      // Ensure input is a fixed-size array of 3 uint256 as expected by contract
-      const input = [
-        proofData.root, // Use the contract's root instead of circuit's computed root
-        proofData.pubSignals[1], // nullifierHash
-        proofData.pubSignals[2]  // actionId
-      ];
-      
-      // Override actionId to match contract expectation for testing mode
-      // This is acceptable for benchmarking since we bypass proof verification
-      input[2] = BigInt(actionId) % 21888242871839275222246405745257275088548364400416034343698204186575808495617n;
-
-      // Enable testing mode on ZKDataContract to bypass proof verification
-      await zkDataContract.setTestingMode(true);
-
+      expect(await zkDataContract.testingMode()).to.equal(false);
       const tx = await zkDataContract.raiseDisputeZK(
         1,
         delegate1.address,
@@ -436,24 +416,11 @@ describe("Dispute & Regulation Phase Gas Benchmarks", function () {
       await zkDataContract.setZkIdentity(await freshDisputeZkIdentity.getAddress());
       await zkDataContract.setTestingMode(false);
       
-      // Enable testing mode on fresh ZKIdentity contract to bypass proof verification
-      await freshDisputeZkIdentity.setTestingMode(true);
-      
       const disputeProofData = await setupIdentityProofWithContract(freshDisputeZkIdentity, disputeActionId);
 
-      // Ensure input is a fixed-size array of 3 uint256 as expected by contract
-      const disputeInput = [
-        disputeProofData.root, // Use the contract's root instead of circuit's computed root
-        disputeProofData.pubSignals[1], // nullifierHash
-        disputeProofData.pubSignals[2]  // actionId
-      ];
-      
-      // Override actionId to match contract expectation for testing mode
-      disputeInput[2] = BigInt(disputeActionId) % 21888242871839275222246405745257275088548364400416034343698204186575808495617n;
+      const disputeInput = disputeProofData.pubSignals;
 
-      // Enable testing mode on ZKDataContract to bypass proof verification
-      await zkDataContract.setTestingMode(true);
-
+      expect(await zkDataContract.testingMode()).to.equal(false);
       await zkDataContract.raiseDisputeZK(
         1,
         delegate1.address,
@@ -467,6 +434,7 @@ describe("Dispute & Regulation Phase Gas Benchmarks", function () {
         disputeProofData.pC,
         disputeInput
       );
+      await zkDataContract.setTestingMode(false);
 
       // Vote on ZK dispute with real proof
       const voteActionId = ethers.keccak256(ethers.solidityPacked(
@@ -483,25 +451,11 @@ describe("Dispute & Regulation Phase Gas Benchmarks", function () {
       await zkDataContract.setZkIdentity(await freshVoteZkIdentity.getAddress());
       await zkDataContract.setTestingMode(false);
       
-      // Enable testing mode on fresh ZKIdentity contract to bypass proof verification
-      await freshVoteZkIdentity.setTestingMode(true);
-      
       const voteProofData = await setupIdentityProofWithContract(freshVoteZkIdentity, voteActionId);
 
-      // Ensure input is a fixed-size array of 3 uint256 as expected by contract
-      const voteInput = [
-        voteProofData.root, // Use the contract's root instead of circuit's computed root
-        voteProofData.pubSignals[1], // nullifierHash
-        voteProofData.pubSignals[2]  // actionId
-      ];
-      
-      // Override actionId to match contract expectation for testing mode
-      // This is acceptable for benchmarking since we bypass proof verification
-      voteInput[2] = BigInt(voteActionId) % 21888242871839275222246405745257275088548364400416034343698204186575808495617n;
+      const voteInput = voteProofData.pubSignals;
 
-      // Enable testing mode on ZKDataContract to bypass proof verification
-      await zkDataContract.setTestingMode(true);
-
+      expect(await zkDataContract.testingMode()).to.equal(false);
       const tx = await zkDataContract.voteOnDisputeZK(1, true, voteProofData.pA, voteProofData.pB, voteProofData.pC, voteInput);
       const receipt = await tx.wait();
 

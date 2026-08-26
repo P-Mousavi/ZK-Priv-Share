@@ -86,7 +86,8 @@ describe("Reward Claiming Phase Gas Benchmarks", function () {
     );
     await zkDataContract.waitForDeployment();
 
-    // Enable testing mode for benchmarking
+    // Testing mode is used only by the fixture-only mint/root helpers below.
+    // Each proof-bearing transaction explicitly turns it off before measuring gas.
     await zkDataContract.setTestingMode(true);
 
     // Register organisations
@@ -127,6 +128,7 @@ describe("Reward Claiming Phase Gas Benchmarks", function () {
       
       // Register the tree root so the contract accepts proofs
       await zkDataContract.setRewardTreeRoot(proofData.input.root);
+      await zkDataContract.setTestingMode(false);
       
       // Call claimReward with valid proof
       const tx = await zkDataContract.connect(recipient).claimReward(
@@ -164,6 +166,7 @@ describe("Reward Claiming Phase Gas Benchmarks", function () {
 
       // Register the tree root
       await zkDataContract.setRewardTreeRoot(proofData.input.root);
+      await zkDataContract.setTestingMode(false);
 
       // Call claimReward with relayer fee
       const relayerFee = ethers.parseEther("0.01");
@@ -199,6 +202,7 @@ describe("Reward Claiming Phase Gas Benchmarks", function () {
       const noteProofData = noteProofs[0];
       const proofData = await generateNoteProof(noteProofData.note, noteProofData.root, noteProofData.proof);
       await zkDataContract.setRewardTreeRoot(proofData.input.root);
+      await zkDataContract.setTestingMode(false);
       
       const solidityProof = await proofToSolidity(proofData);
       const claimTx = await zkDataContract.connect(recipient).claimReward(
@@ -241,6 +245,7 @@ describe("Reward Claiming Phase Gas Benchmarks", function () {
       const noteProofData = noteProofs[0];
       const proofData = await generateNoteProof(noteProofData.note, noteProofData.root, noteProofData.proof);
       await zkDataContract.setRewardTreeRoot(proofData.input.root);
+      await zkDataContract.setTestingMode(false);
       
       const solidityProof = await proofToSolidity(proofData);
       const claimTx = await zkDataContract.connect(recipient).claimReward(
@@ -288,6 +293,7 @@ describe("Reward Claiming Phase Gas Benchmarks", function () {
       const noteProofData = noteProofs[0];
       const proofData = await generateNoteProof(noteProofData.note, noteProofData.root, noteProofData.proof);
       await zkDataContract.setRewardTreeRoot(proofData.input.root);
+      await zkDataContract.setTestingMode(false);
       
       const solidityProof = await proofToSolidity(proofData);
       const claimTx = await zkDataContract.connect(recipient).claimReward(
@@ -341,6 +347,7 @@ describe("Reward Claiming Phase Gas Benchmarks", function () {
       const noteProofData = noteProofs[0];
       const proofData = await generateNoteProof(noteProofData.note, noteProofData.root, noteProofData.proof);
       await zkDataContract.setRewardTreeRoot(proofData.input.root);
+      await zkDataContract.setTestingMode(false);
       
       const solidityProof = await proofToSolidity(proofData);
       const claimTx = await zkDataContract.connect(recipient).claimReward(
@@ -385,6 +392,7 @@ describe("Reward Claiming Phase Gas Benchmarks", function () {
       const noteProofData = noteProofs[0];
       const proofData = await generateNoteProof(noteProofData.note, noteProofData.root, noteProofData.proof);
       await zkDataContract.setRewardTreeRoot(proofData.input.root);
+      await zkDataContract.setTestingMode(false);
       
       const solidityProof = await proofToSolidity(proofData);
       const claimTx = await zkDataContract.connect(recipient).claimReward(
@@ -428,6 +436,7 @@ describe("Reward Claiming Phase Gas Benchmarks", function () {
       const noteProofData = noteProofs[0];
       const proofData = await generateNoteProof(noteProofData.note, noteProofData.root, noteProofData.proof);
       await zkDataContract.setRewardTreeRoot(proofData.input.root);
+      await zkDataContract.setTestingMode(false);
       
       const solidityProof = await proofToSolidity(proofData);
       const claimTx = await zkDataContract.connect(recipient).claimReward(
@@ -654,6 +663,7 @@ describe("Reward Claiming Phase Gas Benchmarks", function () {
       const noteProofData = noteProofs[0];
       const proofData = await generateNoteProof(noteProofData.note, noteProofData.root, noteProofData.proof);
       await zkDataContract.setRewardTreeRoot(proofData.input.root);
+      await zkDataContract.setTestingMode(false);
       
       const solidityProof = await proofToSolidity(proofData);
       const claimTx = await zkDataContract.connect(recipient).claimReward(
@@ -696,6 +706,7 @@ describe("Reward Claiming Phase Gas Benchmarks", function () {
       const noteProofData = noteProofs[0];
       const proofData = await generateNoteProof(noteProofData.note, noteProofData.root, noteProofData.proof);
       await zkDataContract.setRewardTreeRoot(proofData.input.root);
+      await zkDataContract.setTestingMode(false);
       
       const solidityProof = await proofToSolidity(proofData);
       const claimTx = await zkDataContract.connect(recipient).claimReward(

@@ -2,13 +2,13 @@ const { expect } = require("chai");
 const { ethers } = require("hardhat");
 const fs = require("fs");
 const path = require("path");
-const { setupIdentityProof } = require("../helpers/identityProofHelper");
+const { setupIdentityProofWithContract } = require("../helpers/identityProofHelper");
 const { generateRewardNotes, generateRewardTree, generateNoteProof, proofToSolidity } = require("../helpers/rewardProofHelper");
 const { poseidonHash2, randomFieldElement } = require("../helpers/poseidon");
 
 
 describe("CTI Submission & Consumption Phase Gas Benchmarks", function () {
-  let identityContract, zkIdentityContract, zkDataContract;
+  let identityContract, zkIdentityContract, zkDataContract, incrementalBinaryTree;
   let owner, producer, consumer, delegate1, delegate2, manager1, manager2;
   const REGISTRATION_DEPOSIT = ethers.parseEther("1");
   
@@ -34,7 +34,7 @@ describe("CTI Submission & Consumption Phase Gas Benchmarks", function () {
         PoseidonT3: await poseidonT3.getAddress()
       }
     });
-    const incrementalBinaryTree = await IncrementalBinaryTreeFactory.deploy();
+    incrementalBinaryTree = await IncrementalBinaryTreeFactory.deploy();
     await incrementalBinaryTree.waitForDeployment();
 
     // Deploy Standard Identity Contract with library linked
@@ -260,43 +260,29 @@ describe("CTI Submission & Consumption Phase Gas Benchmarks", function () {
       benchmarkResults.requestAccess = requestReceipt.gasUsed.toString();
       console.log(`requestAccess() gas: ${requestReceipt.gasUsed.toString()}`);
 
-      // Get the request ID from the contract
-      const block = await ethers.provider.getBlock("latest");
+      // Get the request ID emitted by the contract.
+      const requestEvent = requestReceipt.logs
+        .map((log) => {
+          try { return zkDataContract.interface.parseLog(log); } catch (_) { return null; }
+        })
+        .find((event) => event && event.name === "ZKRequestCreated");
+      const requestId = requestEvent.args[0];
+
+      // Switch to a fresh tree for valid witness construction. The request has
+      // already selected its delegate; the measured call runs after this
+      // setup-only testing-mode window has been closed.
+      const ZKIdentityFactory = await ethers.getContractFactory("ZKIdentity", {
+        libraries: { IncrementalBinaryTree: await incrementalBinaryTree.getAddress() }
+      });
+      zkIdentityContract = await ZKIdentityFactory.deploy();
+      await zkIdentityContract.waitForDeployment();
+      await zkDataContract.setTestingMode(true);
+      await zkDataContract.setZkIdentity(await zkIdentityContract.getAddress());
+      await zkDataContract.setTestingMode(false);
+
       const identityTreeAddress = await zkIdentityContract.identityTree();
       const identityTree = await ethers.getContractAt("IdentityTree", identityTreeAddress);
-      const maxIndex = await identityTree.getNumberOfLeaves();
-      const randomLeaf = BigInt(ethers.keccak256(ethers.solidityPacked(["uint256", "address"], [block.timestamp, consumer.address]))) % maxIndex;
-      const requestId = BigInt(ethers.keccak256(ethers.solidityPacked(["uint256", "uint256"], [block.timestamp, randomLeaf])));
-      
-      console.log(`Using requestId: ${requestId}`);
-      console.log(`requestId % FIELD_ORDER: ${requestId % 21888242871839275222246405745257275088548364400416034343698204186575808495617n}`);
-
-      // Generate identity commitment first
-      const identitySecret = randomFieldElement();
-      const identityNullifier = randomFieldElement();
-      const identityCommitment = await poseidonHash2(identitySecret, identityNullifier);
-      const identityCommitmentHex = "0x" + identityCommitment.toString(16).padStart(64, "0");
-      
-      // Register the identity commitment in the ZK identity contract first
-      await zkIdentityContract.connect(delegate1).registerIdentity(
-        identityCommitmentHex,
-        { value: REGISTRATION_DEPOSIT }
-      );
-      
-      // Get the actual tree root from the contract after registration
-      const contractTreeRoot = await identityTree.getRoot();
-      
-      // Generate Merkle proof for the registered identity
-      // Since IdentityTree uses IncrementalBinaryTree, we need to get the proof from the tree
-      // For benchmarking with testing mode, we'll use the helper to generate a compatible proof
-      const identityProofData = await setupIdentityProof(requestId);
-      
-      // Override the proof's root with the actual contract tree root
-      // This ensures the proof matches the contract's state
-      identityProofData.pubSignals[0] = contractTreeRoot;
-      
-      // Enable testing mode to bypass proof verification for gas benchmarking
-      await zkIdentityContract.setTestingMode(true);
+      const identityProofData = await setupIdentityProofWithContract(zkIdentityContract, requestId);
 
       // Generate reward notes using the centralized helper
       const rewardAmount = royaltyFee + computationCost; // 0.3 ETH
@@ -312,6 +298,7 @@ describe("CTI Submission & Consumption Phase Gas Benchmarks", function () {
       // Set the reward tree root in contract (requires testing mode)
       await zkDataContract.connect(owner).setTestingMode(true);
       await zkDataContract.connect(owner).setRewardTreeRoot(rewardTreeRoot);
+      await zkDataContract.connect(owner).setTestingMode(false);
       
       // ZK response with real ZK proof parameters from helper
       const responseIpfsCid = "QmResponse1234567890abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ";
@@ -320,26 +307,10 @@ describe("CTI Submission & Consumption Phase Gas Benchmarks", function () {
       const a = identityProofData.pA;
       const b = identityProofData.pB;
       const c = identityProofData.pC;
-      // Ensure input is a fixed-size array of 3 uint256 as expected by contract
-      const input = [
-        identityProofData.pubSignals[0], // root
-        identityProofData.pubSignals[1], // nullifierHash
-        identityProofData.pubSignals[2]  // actionId
-      ];
-      
-      console.log(`Proof actionId (input[2]): ${input[2]}`);
-      console.log(`Expected actionId (requestId % FIELD_ORDER): ${requestId % 21888242871839275222246405745257275088548364400416034343698204186575808495617n}`);
-      console.log(`Match: ${input[2] == requestId % 21888242871839275222246405745257275088548364400416034343698204186575808495617n}`);
-      
-      // Override actionId to match contract expectation for testing mode
-      // This is acceptable for benchmarking since we bypass proof verification
-      const FIELD_ORDER = 21888242871839275222246405745257275088548364400416034343698204186575808495617n;
-      input[2] = requestId % FIELD_ORDER;
-      console.log(`Overridden actionId: ${input[2]}`);
-      
-      // Call provideResponseZK with testing mode enabled to get gas measurement
-      // Note: This bypasses proof verification, so gas measurement does NOT include proof verification overhead
-      // For accurate academic measurements with real proof verification, the circuit/contract mismatch needs to be fixed
+      const input = identityProofData.pubSignals;
+
+      // Testing mode is off: this measurement includes Groth16 verification.
+      expect(await zkDataContract.testingMode()).to.equal(false);
       const responseTx = await zkDataContract.provideResponseZK(
         requestId,
         responseIpfsCid,
@@ -349,17 +320,12 @@ describe("CTI Submission & Consumption Phase Gas Benchmarks", function () {
       );
       const receipt = await responseTx.wait();
       benchmarkResults.provideResponseZK = receipt.gasUsed.toString();
-      console.log(`provideResponseZK() gas (testing mode - bypasses proof verification): ${receipt.gasUsed.toString()}`);
-      
-      await zkDataContract.connect(owner).setTestingMode(false); // Disable after measurement
-      await zkIdentityContract.setTestingMode(false); // Disable ZKIdentity testing mode after measurement
+      console.log(`provideResponseZK() gas (with proof verification): ${receipt.gasUsed.toString()}`);
     });
 
     it("Benchmark: ZK proof verification overhead estimation", async function () {
       console.log(`\n=== ZK Proof Verification Overhead Analysis ===`);
-      console.log(`Note: This test bypasses proof verification for gas benchmarking (testing mode enabled).`);
-      console.log(`For accurate proof verification gas costs, run the ProofVerification.bench.js benchmark.`);
-      console.log(`Current measurement (without proof verification): ${benchmarkResults.provideResponseZK || 'N/A'} gas`);
+      console.log(`Current measurement (with proof verification): ${benchmarkResults.provideResponseZK || 'N/A'} gas`);
     });
   });
 
