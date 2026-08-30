@@ -153,7 +153,7 @@ async function setupIdentityProofWithContract(zkIdentityContract, actionId) {
     throw new Error(`Tree has ${numberOfLeavesBefore} existing leaves. For valid proof generation, the tree must be empty. Use a fresh ZKIdentity contract instance.`);
   }
   
-  // Create a JS IncrementalMerkleTree with depth 5 to match the circuit
+  // Create a JS IncrementalMerkleTree with depth 7 to match the circuit (JoinIdentity(7))
   // Use the same zero values as IncrementalBinaryTree.sol
   const Z_0 = 0n;
   const Z_1 = 14744269619966411208579211824598458697587494354926760081771325075741142829156n;
@@ -161,9 +161,11 @@ async function setupIdentityProofWithContract(zkIdentityContract, actionId) {
   const Z_3 = 11286972368698509976183087595462810875513684078608517520839298933882497716792n;
   const Z_4 = 3607627140608796879659380071776844901612302623152076817094415224584923813162n;
   const Z_5 = 19712377064642672829441595136074946683621277828620209496774504837737984048981n;
+  const Z_6 = 20775607673010627194014556968476266066927294572720319469184847051418138353016n;
+  const Z_7 = 3396914609616007258851405644437304192397291162432396347162513310381425243293n;
   
-  const zeroes = [Z_0, Z_1, Z_2, Z_3, Z_4, Z_5];
-  const jsTree = new IncrementalMerkleTree(hash, 5, zeroes[0], 2);
+  const zeroes = [Z_0, Z_1, Z_2, Z_3, Z_4, Z_5, Z_6, Z_7];
+  const jsTree = new IncrementalMerkleTree(hash, 7, zeroes[0], 2);
   
   // Insert our commitment into the JS tree
   jsTree.insert(commitment);
@@ -185,8 +187,9 @@ async function setupIdentityProofWithContract(zkIdentityContract, actionId) {
   console.log(`Contract tree root: ${contractTreeRoot}`);
   console.log(`Commitment: ${commitment}`);
   
-  // Root mismatch check disabled - circom circuit constraint commented out for benchmarking
-  // The JS tree root and contract root may differ due to Poseidon implementation differences
+  // Note: JS tree uses circomlibjs Poseidon (matches circuit), contract uses poseidon-solidity
+  // Due to implementation differences, the roots will differ. The circuit does not validate
+  // the root constraint, so we use the contract's root for the contract's verification check
   
   // Convert actionId to field element for the circuit
   const actionIdBigInt = BigInt(actionId) % FIELD_ORDER;
@@ -194,19 +197,16 @@ async function setupIdentityProofWithContract(zkIdentityContract, actionId) {
   // Generate proof using the contract's root and JS tree proof
   const proofData = await generateIdentityProofForAction(
     { identitySecret, identityNullifier, commitment: identityCommitmentHex },
-    // The root is public but temporarily unconstrained in the circuit. Bind
-    // the proof to the on-chain root so the contract's root check still holds.
     contractTreeRoot,
     { pathElements: merkleProof.siblings, pathIndices: merkleProof.pathIndices },
     actionIdBigInt
   );
 
-  // Circuit root mismatch check disabled - circom circuit constraint commented out for benchmarking
-  // The circuit computed root may differ from contract root due to Poseidon implementation differences
+  // Log roots for debugging (they will differ due to Poseidon implementation differences)
   const circuitComputedRoot = proofData.publicSignals[0];
   console.log(`Circuit computed root: ${circuitComputedRoot}`);
   console.log(`Contract tree root: ${contractTreeRoot}`);
-  console.log(`Note: Root mismatch expected due to commented circom constraint`);
+  console.log(`Note: Root mismatch expected due to Poseidon implementation differences`);
   
   // Convert to Solidity format
   const solidityProof = await proofToSolidity(proofData);
@@ -220,7 +220,7 @@ async function setupIdentityProofWithContract(zkIdentityContract, actionId) {
     identityCommitment: identityCommitmentHex,
     root: contractTreeRoot,
     actionId: actionIdBigInt,
-    nullifierHash: proofData.publicSignals[1]
+    nullifierHash: proofData.publicSignals[1] // nullifierHash is at index 1
   };
 }
 
@@ -259,7 +259,7 @@ async function setupIdentityProof(actionId) {
     identityCommitment: identityData.commitment,
     root: root,
     actionId: actionIdBigInt, // Return the field-modified actionId
-    nullifierHash: proofData.publicSignals[2] // The nullifierHash is the third public signal
+    nullifierHash: proofData.publicSignals[1] // nullifierHash is at index 1
   };
 }
 

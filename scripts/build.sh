@@ -68,7 +68,7 @@ node build/${CIRCUIT}_js/generate_witness.js \
     build/${CIRCUIT}_js/${CIRCUIT}.wasm $INPUT_JSON build/witness.wtns
 
 echo ">>> Setting up Powers of Tau (ptau)..."
-npx snarkjs powersoftau new bn128 12 build/pot12_0000.ptau -v
+npx snarkjs powersoftau new bn128 13 build/pot12_0000.ptau -v
 printf "%s" "$(openssl rand -hex 32)" | npx snarkjs powersoftau contribute build/pot12_0000.ptau build/pot12_0001.ptau --name="first contribution" -v -e
 npx snarkjs powersoftau prepare phase2 build/pot12_0001.ptau build/pot12_final.ptau -v
 

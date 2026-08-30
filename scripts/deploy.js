@@ -274,6 +274,8 @@ async function main() {
         // Use fully qualified name for contracts with duplicate names
         if (contractName === "Groth16Verifier") {
             factory = await hre.ethers.getContractFactory("contracts/RewardVerifier.sol:Groth16Verifier");
+        } else if (contractName === "PoseidonT3") {
+            factory = await hre.ethers.getContractFactory("contracts/crypto/PoseidonT3.sol:PoseidonT3");
         } else {
             factory = await hre.ethers.getContractFactory(contractName);
         }

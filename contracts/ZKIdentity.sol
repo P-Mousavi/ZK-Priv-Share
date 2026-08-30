@@ -20,12 +20,12 @@ contract ZKIdentity is Groth16Verifier {
     event DepositSlashed(uint256 indexed commitment);
 
     // ZK Verifier Logic for slashing
-    // Note: Parent Verifier expects 11 signals
+    // Note: Parent Verifier expects 3 signals (root, nullifierHash, actionId)
     function verifyProof(
         uint[2] calldata _pA,
         uint[2][2] calldata _pB,
         uint[2] calldata _pC,
-        uint[11] calldata _pubSignals
+        uint[3] calldata _pubSignals
     ) public view override returns (bool) {
         return super.verifyProof(_pA, _pB, _pC, _pubSignals);
     }

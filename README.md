@@ -434,11 +434,10 @@ The contract flow enforces:
 6. `bash scripts/build.sh -c identity -i input.json`
 7. `bash scripts/build.sh -c reward -i reward_input.json`
 8. Start local chain on `127.0.0.1:8545`
-9. `node scripts/deploy.js -c PoseidonT2.sol`
-10. `node scripts/deploy.js -c ZKIdentity.sol`
-11. `node scripts/deploy.js -c RewardVerifier.sol`
-12. `node scripts/deploy.js -c ZKData.sol`
-13. Use generated `proof.json` + `public.json` in contract interaction scripts/tests
+9. `node scripts/deploy.js -c ZKIdentity.sol`
+10. `node scripts/deploy.js -c RewardVerifier.sol`
+11. `node scripts/deploy.js -c ZKData.sol`
+12. Use generated `proof.json` + `public.json` in contract interaction scripts/tests
 
 ---
 

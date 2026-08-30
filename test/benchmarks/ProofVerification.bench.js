@@ -10,7 +10,8 @@ const RESULTS_PATH = path.join(
   __dirname,
   "../../benchmark-results/proof-verification-results.json"
 );
-const TREE_DEPTH = 5;
+const IDENTITY_TREE_DEPTH = 7;
+const REWARD_TREE_DEPTH = 5;
 
 function requireArtifact(relativePath) {
   const artifactPath = path.join(CIRCUIT_BUILD_DIR, relativePath);
@@ -35,13 +36,13 @@ function calculateIntrinsicGas(data) {
   return intrinsicGas;
 }
 
-async function buildMockMerkleProof(poseidon, leaf) {
+async function buildMockMerkleProof(poseidon, leaf, treeDepth) {
   const hash = (left, right) =>
     BigInt(poseidon.F.toObject(poseidon([BigInt(left), BigInt(right)])));
 
   let currentLevel = [
     leaf,
-    ...Array.from({ length: 2 ** TREE_DEPTH - 1 }, (_, index) =>
+    ...Array.from({ length: 2 ** treeDepth - 1 }, (_, index) =>
       BigInt(index + 1)
     )
   ];
@@ -49,7 +50,7 @@ async function buildMockMerkleProof(poseidon, leaf) {
   const pathIndices = [];
   let leafIndex = 0;
 
-  for (let level = 0; level < TREE_DEPTH; level++) {
+  for (let level = 0; level < treeDepth; level++) {
     pathElements.push(currentLevel[leafIndex ^ 1]);
     pathIndices.push(leafIndex & 1);
 
@@ -83,7 +84,7 @@ async function generateIdentityProof(poseidon) {
   const commitment = BigInt(
     poseidon.F.toObject(poseidon([identitySecret, identityNullifier]))
   );
-  const merkleProof = await buildMockMerkleProof(poseidon, commitment);
+  const merkleProof = await buildMockMerkleProof(poseidon, commitment, IDENTITY_TREE_DEPTH);
   const input = {
     identitySecret: identitySecret.toString(),
     identityNullifier: identityNullifier.toString(),
@@ -111,7 +112,7 @@ async function generateRewardProof(poseidon) {
   const nullifierHash = BigInt(
     poseidon.F.toObject(poseidon([nullifier]))
   );
-  const merkleProof = await buildMockMerkleProof(poseidon, commitment);
+  const merkleProof = await buildMockMerkleProof(poseidon, commitment, REWARD_TREE_DEPTH);
   const input = {
     secret: secret.toString(),
     nullifier: nullifier.toString(),
@@ -211,7 +212,7 @@ describe("Groth16 verifyProof() Gas Benchmarks", function () {
   }
 
   it("measures one valid identity proof verification", async function () {
-    expect(identityProof.pubSignals).to.have.length(11);
+    expect(identityProof.pubSignals).to.have.length(3);
     await benchmarkVerification("identity", identityVerifier, identityProof);
   });
 
