@@ -1,7 +1,7 @@
 {
   "name": "priv-share-zk",
   "version": "1.0.0",
-  "description": "",
+  "description": "Research prototype for zero-knowledge, privacy-preserving CTI sharing with Circom and Solidity.",
   "main": "index.js",
   "scripts": {
     "test": "npm run test:contracts",
