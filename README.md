@@ -1,4 +1,4 @@
-# priv-share-zk
+# ZK-Priv-Share
 
 Proof-of-concept smart-contract and Circom implementation of privacy-preserving cyber-threat-intelligence (CTI) sharing. It combines an organisation identity registry, Poseidon-based identity commitments, Groth16 proof verification, CTI request/response and dispute workflows, and an experimental fixed-denomination reward-note claim flow.
 
@@ -162,10 +162,3 @@ See [BENCHMARK_README.md](BENCHMARK_README.md) for benchmark purpose, output fil
 - Request allocation uses block-derived pseudo-randomness and is not secure randomness.
 - The build script creates a fresh demo Powers of Tau setup each run. Use a trusted ceremony and reproducible artefact process for any real deployment.
 - CTI content and CIDs are off-chain; the contracts do not validate their availability or correctness.
-
-## Suggested next steps
-
-1. Enforce Merkle-root equality in both circuits and use a fully compatible on-chain Poseidon/tree implementation.
-2. Implement append-only reward-tree insertion, root history, and access control for root updates.
-3. Remove or strictly restrict testing helpers and replace pseudo-random allocation.
-4. Add reproducible trusted-setup handling, calldata generation scripts, and deployment configuration for non-local networks.
