@@ -52,6 +52,9 @@ npx hardhat test test/benchmarks/Deployment.bench.js
 
 # Direct Groth16 proof verification
 npx hardhat test test/benchmarks/ProofVerification.bench.js
+
+# History-hiding state transition (real Groth16 proof)
+npx hardhat test test/benchmarks/HistoryHidingState.bench.js
 ```
 
 ### 2. Run All Benchmarks
@@ -82,6 +85,7 @@ Results are saved to:
 - `benchmark-results/deployment-results.json` - Deployment gas costs
 - `benchmark-results/proof-verification-results.json` - Direct identity and reward `verifyProof()` gas costs
 - `benchmark-results/offchain-proving-results.json` - Off-chain proving times
+- `benchmark-results/history-hiding-state-results.json` - History-hiding proving time, proof size, verifier gas, transition gas, and storage slots
 - `reports/GasComparisonReport.md` - Comprehensive markdown report
 - `reports/GasComparisonReport.csv` - CSV data for analysis
 
@@ -155,3 +159,17 @@ This decomposition enables denomination privacy while preserving a single global
 - Gas costs are measured on Hardhat network (chainId: 31337)
 - All benchmarks include statistical analysis where applicable
 - Multi-note minting benchmarks demonstrate the privacy-cost tradeoff for academic analysis
+
+## History-hiding state benchmark
+
+This benchmark measures the dedicated `PrivateStateTree` flow using a real Groth16 proof for the `NONEXISTENT → SUBMITTED` transition. It records proving time, serialized proof size, standalone verifier gas, complete transition gas, and state storage slots written.
+
+Build the circuit artifacts and generated verifier before running it:
+
+```bash
+bash scripts/build.sh -c state_transition -i state_transition_input.json
+npm run compile
+npx hardhat test test/benchmarks/HistoryHidingState.bench.js
+```
+
+Results are written to `benchmark-results/history-hiding-state-results.json`. The state circuit requires a 2¹⁴ Powers of Tau setup because it exceeds the 2¹³ capacity. These local ceremony artifacts are demonstration-only and are not production ceremony material.

@@ -329,6 +329,16 @@ async function main() {
             console.log(`🔗 Using Identity contract address: ${identityContract}`);
             console.log(`👥 Initial managers (${initialManagers.length}):`, initialManagers.join(", "));
             console.log(`🗳️  Voting threshold: ${threshold}`);
+        } else if (contractName === "PrivateStateTree") {
+            const verifierAddress = loadDeployedAddress("StateTransitionGroth16Verifier");
+            const publicSignalsPath = path.join(ROOT, "circuits", "build", "public.json");
+            if (!fs.existsSync(publicSignalsPath)) {
+                throw new Error("State-transition public signals not found; build state_transition first.");
+            }
+            const publicSignals = JSON.parse(fs.readFileSync(publicSignalsPath, "utf8"));
+            constructorArgs = [publicSignals[0], verifierAddress];
+            console.log(`🔗 Using state-transition verifier: ${verifierAddress}`);
+            console.log(`🌳 Using initial state root: ${publicSignals[0]}`);
         } else {
             // For other contracts, you can add more logic here
             throw new Error(`Contract ${contractName} requires constructor arguments but no handler is defined.`);
@@ -370,4 +380,3 @@ main().catch((err) => {
     console.error(err);
     process.exit(1);
 });
-

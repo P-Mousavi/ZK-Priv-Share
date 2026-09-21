@@ -68,7 +68,7 @@ node build/${CIRCUIT}_js/generate_witness.js \
     build/${CIRCUIT}_js/${CIRCUIT}.wasm $INPUT_JSON build/witness.wtns
 
 echo ">>> Setting up Powers of Tau (ptau)..."
-npx snarkjs powersoftau new bn128 13 build/pot12_0000.ptau -v
+npx snarkjs powersoftau new bn128 14 build/pot12_0000.ptau -v
 printf "%s" "$(openssl rand -hex 32)" | npx snarkjs powersoftau contribute build/pot12_0000.ptau build/pot12_0001.ptau --name="first contribution" -v -e
 npx snarkjs powersoftau prepare phase2 build/pot12_0001.ptau build/pot12_final.ptau -v
 
@@ -89,6 +89,8 @@ echo ">>> Generating the verifier solidity program"
 # Output to appropriate verifier file based on circuit name
 if [ "$CIRCUIT" = "reward" ]; then
     VERIFIER_FILE="../contracts/RewardVerifier.sol"
+elif [ "$CIRCUIT" = "state_transition" ]; then
+    VERIFIER_FILE="../contracts/StateTransitionVerifier.sol"
 else
     VERIFIER_FILE="../contracts/Verifier.sol"
 fi
@@ -97,6 +99,9 @@ npx snarkjs zkey export solidityverifier build/${CIRCUIT}_final.zkey $VERIFIER_F
 echo ">>> Post-processing Verifier.sol to add 'virtual' keyword and fix pragma version"
 # Add 'virtual' to verifyProof function to allow overriding
 sed -i '/function verifyProof.*public view returns (bool)/s/public view returns/public view virtual returns/' $VERIFIER_FILE
+if [ "$CIRCUIT" = "state_transition" ]; then
+    sed -i 's/contract Groth16Verifier {/contract StateTransitionGroth16Verifier {/' $VERIFIER_FILE
+fi
 # Fix pragma version to match project (0.8.20)
 sed -i 's/pragma solidity >=0.7.0 <0.9.0;/pragma solidity ^0.8.20;/' $VERIFIER_FILE
 
