@@ -6,7 +6,8 @@ include "./lib/merkleTree.circom";
 template StateTransition(levels) {
     signal input secret;
     signal input requestId;
-    signal input stateCommitment;
+    // Poseidon(ctiId, version, SHA256(ctiPayload) mod Fr), supplied as a field element.
+    signal input ctiCommitment;
     signal input oldStatus;
     signal input newStatus;
     signal input oldPathElements[levels];
@@ -21,12 +22,12 @@ template StateTransition(levels) {
     component oldLeafHash = Poseidon(3);
     oldLeafHash.inputs[0] <== requestId;
     oldLeafHash.inputs[1] <== oldStatus;
-    oldLeafHash.inputs[2] <== stateCommitment;
+    oldLeafHash.inputs[2] <== ctiCommitment;
 
     component newLeafHash = Poseidon(3);
     newLeafHash.inputs[0] <== requestId;
     newLeafHash.inputs[1] <== newStatus;
-    newLeafHash.inputs[2] <== stateCommitment;
+    newLeafHash.inputs[2] <== ctiCommitment;
 
     component oldMembership = MerkleTreeInclusionProof(levels);
     oldMembership.leaf <== oldLeafHash.out;
@@ -49,4 +50,6 @@ template StateTransition(levels) {
     nullifier === nullifierHash.out;
 }
 
-component main {public [oldRoot, newRoot, nullifier]} = StateTransition(7);
+// Publishing C_D lets the application contract bind a proof to the CTI it has
+// already committed to, without publishing the CTI payload or request identifier.
+component main {public [oldRoot, newRoot, nullifier, ctiCommitment]} = StateTransition(7);

@@ -16,7 +16,7 @@ async function generateRewardProof(secret, denomination = 1000000000000000000n, 
   const proof = proofs[0];
 
   // Compute nullifier hash
-  const nullifierHash = await poseidonHash(nullifier);
+  const nullifierHash = await poseidonHashArray([secret, commitment, 0x524557415244n]);
 
   // Circuit input (recipient and relayerFee are no longer part of the circuit)
   const input = {
@@ -30,8 +30,8 @@ async function generateRewardProof(secret, denomination = 1000000000000000000n, 
   };
 
   // Generate Groth16 proof
-  const wasmPath = path.join(__dirname, "../../circuits/build/reward_js/reward.wasm");
-  const zkeyPath = path.join(__dirname, "../../circuits/build/reward_final.zkey");
+  const wasmPath = path.join(__dirname, "../../circuits/build/artifacts/reward/reward.wasm");
+  const zkeyPath = path.join(__dirname, "../../circuits/build/artifacts/reward/reward.zkey");
 
   const { proof: snarkProof, publicSignals } = await groth16.fullProve(input, wasmPath, zkeyPath);
 
@@ -106,13 +106,13 @@ async function generateRewardTree(notes) {
  */
 async function generateNoteProof(noteData, treeRoot, merkleProof) {
   // Compute nullifier hash
-  const nullifierHash = await poseidonHash(noteData.nullifier);
+  const nullifierHash = await poseidonHashArray([noteData.secret, noteData.commitment, 0x524557415244n]);
 
   // Circuit input
   const input = {
     secret: noteData.secret.toString(),
     nullifier: noteData.nullifier.toString(),
-    pathElements: merkleProof.pathElements.map(e => e.toString()),
+    pathElements: (merkleProof.pathElements || merkleProof.siblings).map(e => Array.isArray(e) ? e[0].toString() : e.toString()),
     pathIndices: merkleProof.pathIndices,
     root: treeRoot.toString(),
     denomination: noteData.denomination.toString(),
@@ -120,8 +120,8 @@ async function generateNoteProof(noteData, treeRoot, merkleProof) {
   };
 
   // Generate Groth16 proof
-  const wasmPath = path.join(__dirname, "../../circuits/build/reward_js/reward.wasm");
-  const zkeyPath = path.join(__dirname, "../../circuits/build/reward_final.zkey");
+  const wasmPath = path.join(__dirname, "../../circuits/build/artifacts/reward/reward.wasm");
+  const zkeyPath = path.join(__dirname, "../../circuits/build/artifacts/reward/reward.zkey");
 
   const { proof: snarkProof, publicSignals } = await groth16.fullProve(input, wasmPath, zkeyPath);
 

@@ -33,7 +33,7 @@ describe("Reward Verifier Direct Test", function () {
     const proof = proofs[0];
     
     // Compute nullifier hash
-    const nullifierHash = await poseidonHash(nullifier);
+    const nullifierHash = await poseidonHashArray([secret, commitment, 0x524557415244n]);
     
     // Circuit input (recipient and relayerFee are no longer part of the circuit)
     const input = {
@@ -47,8 +47,8 @@ describe("Reward Verifier Direct Test", function () {
     };
 
     // Generate Groth16 proof
-    const wasmPath = path.join(__dirname, "../circuits/build/reward_js/reward.wasm");
-    const zkeyPath = path.join(__dirname, "../circuits/build/reward_final.zkey");
+    const wasmPath = path.join(__dirname, "../circuits/build/artifacts/reward/reward.wasm");
+    const zkeyPath = path.join(__dirname, "../circuits/build/artifacts/reward/reward.zkey");
 
     const { proof: snarkProof, publicSignals } = await groth16.fullProve(input, wasmPath, zkeyPath);
 
@@ -74,7 +74,7 @@ describe("Reward Verifier Direct Test", function () {
     ];
 
     // Verify using snarkjs directly
-    const vk = require("../circuits/build/verification_key.json");
+    const vk = require("../circuits/build/artifacts/reward/verification_key.json");
     const snarkjsResult = await groth16.verify(vk, publicSignals, snarkProof);
     console.log("snarkjs verification result:", snarkjsResult);
 

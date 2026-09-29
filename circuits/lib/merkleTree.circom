@@ -11,11 +11,6 @@ template MerkleTreeInclusionProof(levels) {
     signal input pathIndices[levels];
     
     signal output root;
-    signal output debugLevels[levels + 1];
-    signal output debugLeaf;
-    signal output debugLeft;
-    signal output debugRight;
-    signal output debugHash;
     
     component hashers[levels];
     
@@ -58,9 +53,4 @@ template MerkleTreeInclusionProof(levels) {
     }
     
     root <== level[levels];
-    for (var i = 0; i <= levels; i++)
-    {
-        debugLevels[i] <== level[i];
-    }
 }
-

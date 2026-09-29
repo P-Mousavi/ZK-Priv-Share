@@ -1,6 +1,9 @@
 const { expect } = require("chai");
 const { wasm } = require("circom_tester");
 const path = require("path");
+const fs = require("fs");
+const os = require("os");
+const { execFileSync } = require("child_process");
 const { poseidonHash, poseidonHashArray, randomFieldElement } = require("../helpers/poseidon");
 const { createMerkleTree } = require("../helpers/merkle");
 
@@ -18,7 +21,7 @@ describe("Reward Circuit", () => {
     const leaves = [commitment, randomFieldElement(), randomFieldElement(), randomFieldElement()];
     const { root, proofs } = await createMerkleTree(leaves, LEVELS);
     const proof = proofs[0];
-    const nullifierHash = await poseidonHash(nullifier);
+    const nullifierHash = await poseidonHashArray([secret, commitment, 0x524557415244n]);
 
     return {
       secret,
@@ -33,10 +36,9 @@ describe("Reward Circuit", () => {
 
   before(async () => {
     const circuitPath = path.join(__dirname, "../../circuits/reward.circom");
-    circuit = await wasm(circuitPath, {
-      output: path.join(__dirname, "../../circuits/build/reward_test"),
-      recompile: false
-    });
+    const output = fs.mkdtempSync(path.join(os.tmpdir(), "reward-test-"));
+    execFileSync("/home/spm/.cargo/bin/circom", ["--wasm", "--sym", "--r1cs", "--output", output, circuitPath], { stdio: "inherit" });
+    circuit = await wasm(circuitPath, { output, recompile: false });
   });
 
   it("should generate a valid witness for a fixed-denomination reward note", async () => {

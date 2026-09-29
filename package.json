@@ -6,11 +6,18 @@
   "scripts": {
     "test": "npm run test:contracts",
     "test:contracts": "./node_modules/.bin/hardhat test test/contracts/*.test.js",
-    "test:circuits": "npx ts-mocha test/circuits/*.test.ts --timeout 300000",
-    "test:all": "npm run test:contracts && npm run test:circuits",
+    "test:history-hiding": "./node_modules/.bin/hardhat test test/history-hiding/*.test.js",
+    "test:circuits": "PATH=/home/spm/.cargo/bin:$PATH npx ts-mocha test/circuits/*.test.ts --timeout 300000",
+    "test:poseidon-compatibility": "./node_modules/.bin/hardhat test test/contracts/PoseidonCompatibility.test.js",
+    "test:all": "npm run test:contracts && npm run test:history-hiding && npm run test:circuits",
+    "build:groth16": "bash scripts/buildAllGroth16Artifacts.sh",
+    "verify:groth16": "bash scripts/verifyGroth16Artifacts.sh",
     "benchmark:linkability": "hardhat test test/benchmarks/Linkability.bench.js",
     "benchmark:identity-scalability": "hardhat test test/benchmarks/IdentityRegistrationScalability.bench.js",
     "benchmark:reward-activity": "hardhat test test/benchmarks/RewardNoteActivity.bench.js",
+    "benchmark:history-hiding": "hardhat test test/benchmarks/HistoryHidingState.bench.js test/benchmarks/HistoryHidingExtended.bench.js",
+    "benchmark:history-hiding:state": "hardhat test test/benchmarks/HistoryHidingState.bench.js",
+    "benchmark:history-hiding:extended": "hardhat test test/benchmarks/HistoryHidingExtended.bench.js",
     "compile": "./node_modules/.bin/hardhat compile",
     "build": "npm run compile"
   },
@@ -40,6 +47,7 @@
     "hardhat": "^2.22.0",
     "hardhat-gas-reporter": "^1.0.10",
     "mocha": "^10.0.0",
+    "patch-package": "^8.0.1",
     "ts-mocha": "^11.1.0",
     "ts-node": "^10.9.2",
     "typescript": "^5.0.0"

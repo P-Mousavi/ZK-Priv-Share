@@ -1083,6 +1083,48 @@ describe("ZKDataContract", function () {
     });
   });
 
+  describe("End-to-end private CTI accountability", () => {
+    it("binds CTI integrity, a private transition, receipt, dispute, and existing slashing", async () => {
+      const { computeCtiCommitment } = require("../../scripts/helpers/ctiCommitment");
+      const payload = "CTI: indicator=203.0.113.7";
+      const ctiCommitment = await computeCtiCommitment(1, 1, payload);
+      expect(await computeCtiCommitment(1, 1, `${payload} modified`)).to.not.equal(ctiCommitment);
+      const receiptDelegate = ethers.Wallet.createRandom().connect(ethers.provider);
+      await ethers.provider.send("hardhat_setBalance", [receiptDelegate.address, ethers.toBeHex(ethers.parseEther("10"))]);
+      await identityContract.connect(receiptDelegate).registerOrganisation("QmReceiptDelegate1234567890abcdefghijklmnopqrstuvwxyz", { value: REGISTRATION_DEPOSIT });
+
+      const Mock = await ethers.getContractFactory("StateTransitionVerifierMock");
+      const mock = await Mock.deploy();
+      const Tree = await ethers.getContractFactory("PrivateStateTree");
+      const tree = await Tree.deploy(11, await mock.getAddress());
+      await zkData.connect(owner).setPrivateStateTree(await tree.getAddress());
+
+      const cid = "QmPolicy1234567890abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ";
+      await zkData.connect(producer).shareCti(cid, cid, ROYALTY_FEE, COMPUTATION_COST, [receiptDelegate.address], [1]);
+      await zkData.connect(producer).commitCti(1, ctiCommitment, 1);
+      await zkData.connect(consumer).initialRequest(1, 1);
+      await zkData.connect(consumer).provideCredentials(1, cid, { value: 2n * ROYALTY_FEE + COMPUTATION_COST });
+      await zkData.connect(receiptDelegate).provideResponse(1, cid);
+
+      const proof = [[1, 2], [[1, 2], [3, 4]], [5, 6]];
+      await expect(zkData.connect(receiptDelegate).submitPrivateResponse(1, ...proof, 11, 22, 33, ctiCommitment))
+        .to.emit(zkData, "PrivateResponseSubmitted");
+      expect(await tree.stateRoot()).to.equal(22);
+      expect(await tree.usedNullifiers(33)).to.equal(true);
+      await expect(zkData.connect(receiptDelegate).submitPrivateResponse(1, ...proof, 22, 44, 33, ctiCommitment))
+        .to.be.revertedWith("Private response already submitted");
+
+      const digest = await tree.receiptDigest(1, ctiCommitment, 1);
+      const signature = ethers.Signature.from(receiptDelegate.signingKey.sign(digest)).serialized;
+      await zkData.acceptCtiReceipt(1, 1, signature);
+      await expect(zkData.connect(consumer).raiseDisputeWithReceipt(1, receiptDelegate.address, 1, cid, 1))
+        .to.emit(zkData, "DisputeRaised");
+      await zkData.connect(manager1).voteOnDispute(1, true);
+      await zkData.connect(manager2).voteOnDispute(1, true);
+      expect((await identityContract.organisations(receiptDelegate.address)).deposit).to.equal(0);
+    });
+  });
+
   describe("Security: Slashing Mechanics", () => {
     beforeEach(async () => {
       const accessPolicyIpfsCid = "QmPolicy1234567890abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ";

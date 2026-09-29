@@ -147,7 +147,7 @@ async function generateRewardInput() {
     console.log(`Path Indices: [${pathIndices.join(", ")}]`);
     
     // Step 5: Compute nullifier hash (Poseidon(nullifier))
-    const nullifierHashResult = poseidon([nullifier]);
+    const nullifierHashResult = poseidon([secret, commitment, 0x524557415244n]);
     const nullifierHash = BigInt(poseidon.F.toString(nullifierHashResult));
     
     console.log(`\nNullifier Hash: ${nullifierHash.toString()}`);

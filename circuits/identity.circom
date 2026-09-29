@@ -6,7 +6,10 @@ include "./lib/merkleTree.circom";
 template JoinIdentity(levels) {
     // 1. Private Inputs (The secrets)
     signal input identitySecret;
-    signal input identityNullifier;
+    // This secret is deliberately distinct from identitySecret.  It is used
+    // only to derive action nullifiers; the canonical IdentityTree leaf is
+    // Poseidon(identitySecret), matching state/rating/slashing.
+    signal input identityNullifierSecret;
     signal input pathElements[levels];
     signal input pathIndices[levels];
 
@@ -21,9 +24,8 @@ template JoinIdentity(levels) {
     // --- Logic ---
 
     // A. Reconstruct the Commitment
-    component commHasher = Poseidon(2);
+    component commHasher = Poseidon(1);
     commHasher.inputs[0] <== identitySecret;
-    commHasher.inputs[1] <== identityNullifier;
     
     // B. Verify Merkle Proof (Identity exists in the tree)
     component treeVerifier = MerkleTreeInclusionProof(levels);
@@ -31,15 +33,16 @@ template JoinIdentity(levels) {
     treeVerifier.pathIndices <== pathIndices;
     treeVerifier.pathElements <== pathElements;
     
-    // The calculated root must match the public root provided by the contract
-    // Note: Disabled due to Poseidon implementation differences between circomlib and poseidon-solidity
-    // The contract will verify the root separately
-    // treeVerifier.root === root; 
+    // Intentionally disabled for this proof-of-concept: the deployed
+    // Solidity tree currently uses Poseidon parameters/digests that do not
+    // exactly match circomlib.  The benchmark therefore measures the proof
+    // workflow without claiming this circuit enforces Solidity-root equality.
+    // treeVerifier.root === root;
 
     // C. Generate Nullifier Hash (To identify this user uniquely for this action without revealing identity)
     // We bind the nullifier to the actionId to ensure this proof is for THIS transaction only
     component nullifierHasher = Poseidon(2);
-    nullifierHasher.inputs[0] <== identityNullifier;
+    nullifierHasher.inputs[0] <== identityNullifierSecret;
     nullifierHasher.inputs[1] <== actionId;
     
     nullifierHash <== nullifierHasher.out;

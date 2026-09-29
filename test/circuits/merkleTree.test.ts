@@ -1,6 +1,9 @@
 const { expect } = require("chai");
 const { wasm } = require("circom_tester");
 const path = require("path");
+const fs = require("fs");
+const os = require("os");
+const { execFileSync } = require("child_process");
 const { poseidonHash2, randomFieldElement } = require("../helpers/poseidon");
 const { createMerkleTree } = require("../helpers/merkle");
 
@@ -9,8 +12,10 @@ describe("Merkle Tree Circuit", () => {
   const LEVELS = 5;
 
   before(async () => {
-    const circuitPath = path.join(__dirname, "../../circuits/lib/merkleTree.circom");
-    circuit = await wasm(circuitPath);
+    const circuitPath = path.join(__dirname, "../../circuits/merkle_test.circom");
+    const output = fs.mkdtempSync(path.join(os.tmpdir(), "merkle-test-"));
+    execFileSync("/home/spm/.cargo/bin/circom", ["--wasm", "--sym", "--r1cs", "--output", output, circuitPath], { stdio: "inherit" });
+    circuit = await wasm(circuitPath, { output, recompile: false });
   });
 
   describe("MerkleTreeInclusionProof", () => {
@@ -24,11 +29,12 @@ describe("Merkle Tree Circuit", () => {
       const input = {
         leaf,
         pathElements: proof.pathElements,
-        pathIndices: proof.pathIndices
+        pathIndices: proof.pathIndices,
+        expectedRoot: root
       };
       
       const witness = await circuit.calculateWitness(input);
-      const computedRoot = BigInt(witness[witness.length - 1]);
+      const computedRoot = BigInt(witness[1]);
       
       expect(computedRoot).to.equal(root);
     });
@@ -47,14 +53,15 @@ describe("Merkle Tree Circuit", () => {
       const input = {
         leaf,
         pathElements: invalidPathElements,
-        pathIndices: proof.pathIndices
+        pathIndices: proof.pathIndices,
+        expectedRoot: root
       };
       
       try {
         await circuit.calculateWitness(input);
         expect.fail("Should have thrown an error");
       } catch (error: any) {
-        expect(error.message).to.include("Assert fail");
+        expect(error.message).to.match(/Assert Failed/i);
       }
     });
 
@@ -72,14 +79,15 @@ describe("Merkle Tree Circuit", () => {
       const input = {
         leaf,
         pathElements: proof.pathElements,
-        pathIndices: invalidPathIndices
+        pathIndices: invalidPathIndices,
+        expectedRoot: root
       };
       
       try {
         await circuit.calculateWitness(input);
         expect.fail("Should have thrown an error");
       } catch (error: any) {
-        expect(error.message).to.include("Assert fail");
+        expect(error.message).to.match(/Assert Failed/i);
       }
     });
 
@@ -91,11 +99,12 @@ describe("Merkle Tree Circuit", () => {
         const input = {
           leaf: leaves[i],
           pathElements: proofs[i].pathElements,
-          pathIndices: proofs[i].pathIndices
+          pathIndices: proofs[i].pathIndices,
+          expectedRoot: root
         };
         
         const witness = await circuit.calculateWitness(input);
-        const computedRoot = BigInt(witness[witness.length - 1]);
+        const computedRoot = BigInt(witness[1]);
         
         expect(computedRoot).to.equal(root);
       }
@@ -111,11 +120,12 @@ describe("Merkle Tree Circuit", () => {
       const input = {
         leaf,
         pathElements: proof.pathElements,
-        pathIndices: proof.pathIndices
+        pathIndices: proof.pathIndices,
+        expectedRoot: root
       };
       
       const witness = await circuit.calculateWitness(input);
-      const computedRoot = BigInt(witness[witness.length - 1]);
+      const computedRoot = BigInt(witness[1]);
       
       expect(computedRoot).to.equal(root);
     });
@@ -131,11 +141,12 @@ describe("Merkle Tree Circuit", () => {
       const input = {
         leaf,
         pathElements: proof.pathElements,
-        pathIndices: proof.pathIndices
+        pathIndices: proof.pathIndices,
+        expectedRoot: root
       };
       
       const witness = await circuit.calculateWitness(input);
-      const computedRoot = BigInt(witness[witness.length - 1]);
+      const computedRoot = BigInt(witness[1]);
       
       expect(computedRoot).to.equal(root);
     });
@@ -150,11 +161,12 @@ describe("Merkle Tree Circuit", () => {
       const input = {
         leaf,
         pathElements: proof.pathElements,
-        pathIndices: proof.pathIndices
+        pathIndices: proof.pathIndices,
+        expectedRoot: root
       };
       
       const witness = await circuit.calculateWitness(input);
-      const circuitRoot = BigInt(witness[witness.length - 1]);
+      const circuitRoot = BigInt(witness[1]);
       
       expect(circuitRoot).to.equal(root);
     });
@@ -169,11 +181,12 @@ describe("Merkle Tree Circuit", () => {
       const input = {
         leaf,
         pathElements: proof.pathElements,
-        pathIndices: proof.pathIndices
+        pathIndices: proof.pathIndices,
+        expectedRoot: root
       };
       
       const witness = await circuit.calculateWitness(input);
-      const computedRoot = BigInt(witness[witness.length - 1]);
+      const computedRoot = BigInt(witness[1]);
       
       expect(computedRoot).to.equal(root);
     });
@@ -189,11 +202,12 @@ describe("Merkle Tree Circuit", () => {
       const input = {
         leaf,
         pathElements: proof.pathElements,
-        pathIndices: proof.pathIndices
+        pathIndices: proof.pathIndices,
+        expectedRoot: root
       };
       
       const witness = await circuit.calculateWitness(input);
-      const computedRoot = BigInt(witness[witness.length - 1]);
+      const computedRoot = BigInt(witness[1]);
       
       expect(computedRoot).to.equal(root);
     });

@@ -31,7 +31,9 @@ contract ZKIdentity is Groth16Verifier {
     }
 
     /**
-     * @dev User generates commitment off-chain: Poseidon(secret, nullifier)
+     * @dev User generates the canonical History-hiding commitment off-chain:
+     * Poseidon(identitySecret).  The separate identity-nullifier secret is
+     * used for action nullifiers and is never registered as part of the leaf.
      * @param _identityCommitment The Poseidon hash commitment
      */
     function registerIdentity(uint256 _identityCommitment) external payable {

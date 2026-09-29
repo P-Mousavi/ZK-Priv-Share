@@ -2,7 +2,10 @@
 
 Proof-of-concept smart-contract and Circom implementation of privacy-preserving cyber-threat-intelligence (CTI) sharing. It combines an organisation identity registry, Poseidon-based identity commitments, Groth16 proof verification, CTI request/response and dispute workflows, and an experimental fixed-denomination reward-note claim flow.
 
-This repository is for local development and research. It is not production-ready: the circuits currently do not constrain their supplied Merkle roots, the on-chain identity-tree Poseidon implementation is not fully compatible with circomlib, and reward-tree root management is test-only. See [Security and current limitations](#security-and-current-limitations).
+This repository is for local development and research. It is not production-ready: the identity circuit intentionally does not constrain its supplied Solidity Merkle root because the on-chain and circomlib Poseidon trees are not yet compatible, and reward-tree root management is test-only. See [Security and current limitations](#security-and-current-limitations).
+
+The history-hiding extension and its explicit proof-of-concept boundary are
+documented in [HISTORY_HIDING_README.md](HISTORY_HIDING_README.md).
 
 ## Components
 
@@ -85,6 +88,12 @@ bash scripts/build.sh -c reward -i reward_input.json
 ```
 
 `build.sh` compiles a circuit, creates a demo Groth16 setup and proof, verifies that proof locally, and writes the corresponding Solidity verifier. It is intentionally a demo setup; do not use its ceremony artefacts in production.
+
+For the canonical History-hiding circuits, regenerate all real local proof
+artifacts with `npm run build:groth16`, then validate their local proofs and
+generated on-chain verifiers with `npm run verify:groth16` and
+`npx hardhat test test/contracts/Groth16Artifacts.test.js`. Generated circuit
+artifacts are kept under `circuits/build/artifacts/`.
 
 Deploy in this order:
 

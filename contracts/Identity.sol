@@ -54,7 +54,7 @@ contract IdentityContract {
     }
 
     function registerOrganisation(string calldata _identityInfoIpfsCid) external payable {
-        require(!testingMode || organisations[msg.sender].isRegistered == false, "Organisation already registered");
+        require(!organisations[msg.sender].isRegistered, "Organisation already registered");
         require(msg.value == REGISTRATION_DEPOSIT, "Incorrect registration deposit");
 
         // Skip struct storage in testing mode for fair gas comparison with ZK

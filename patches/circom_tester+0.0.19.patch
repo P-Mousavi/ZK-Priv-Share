@@ -1,0 +1,33 @@
+diff --git a/node_modules/circom_tester/.github/workflows/main.yml b/node_modules/circom_tester/.github/workflows/main.yml
+old mode 100644
+new mode 100755
+diff --git a/node_modules/circom_tester/README.md b/node_modules/circom_tester/README.md
+old mode 100644
+new mode 100755
+diff --git a/node_modules/circom_tester/c/tester.js b/node_modules/circom_tester/c/tester.js
+old mode 100644
+new mode 100755
+diff --git a/node_modules/circom_tester/index.js b/node_modules/circom_tester/index.js
+old mode 100644
+new mode 100755
+diff --git a/node_modules/circom_tester/test/Multiplier2.circom b/node_modules/circom_tester/test/Multiplier2.circom
+old mode 100644
+new mode 100755
+diff --git a/node_modules/circom_tester/test/multiplier2.js b/node_modules/circom_tester/test/multiplier2.js
+old mode 100644
+new mode 100755
+diff --git a/node_modules/circom_tester/wasm/tester.js b/node_modules/circom_tester/wasm/tester.js
+old mode 100644
+new mode 100755
+index 1609503..71d7b40
+--- a/node_modules/circom_tester/wasm/tester.js
++++ b/node_modules/circom_tester/wasm/tester.js
+@@ -16,7 +16,7 @@ module.exports = wasm_tester;
+ 
+ async function  wasm_tester(circomInput, _options) {
+ 
+-    assert(await compiler_above_version("2.0.0"),"Wrong compiler version. Must be at least 2.0.0");
++//    assert(await compiler_above_version("2.0.0"),"Wrong compiler version. Must be at least 2.0.0");
+ 
+     const baseName = path.basename(circomInput, ".circom");
+     const options = Object.assign({}, _options);

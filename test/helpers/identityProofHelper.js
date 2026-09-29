@@ -12,13 +12,13 @@ const FIELD_ORDER = 218882428718392752222464057452572750885483644004160343436982
  * This proof demonstrates ownership of an identity in the Merkle tree
  * and binds it to a specific action (e.g., dispute raising, voting)
  */
-async function generateIdentityProof(identitySecret, identityNullifier, actionId, treeRoot, merkleProof) {
+async function generateIdentityProof(identitySecret, identityNullifierSecret, actionId, treeRoot, merkleProof) {
   // Circuit input for identity circuit
   // actionId must be within the Baby Jubjub field, so we mod by FIELD_ORDER
   const actionIdBigInt = BigInt(actionId) % FIELD_ORDER;
   const input = {
     identitySecret: identitySecret.toString(),
-    identityNullifier: identityNullifier.toString(),
+    identityNullifierSecret: identityNullifierSecret.toString(),
     pathElements: merkleProof.pathElements.map(e => e.toString()),
     pathIndices: merkleProof.pathIndices,
     root: treeRoot.toString(),
@@ -40,9 +40,9 @@ async function generateIdentityProof(identitySecret, identityNullifier, actionId
       root: treeRoot,
       actionId: actionIdBigInt
     },
-    identityCommitment: "0x" + (await poseidonHashArray([identitySecret, identityNullifier])).toString(16).padStart(64, "0"),
+    identityCommitment: "0x" + (await poseidonHashArray([identitySecret])).toString(16).padStart(64, "0"),
     identitySecret,
-    identityNullifier
+    identityNullifierSecret
   };
 }
 
@@ -52,14 +52,14 @@ async function generateIdentityProof(identitySecret, identityNullifier, actionId
  */
 async function generateIdentityCommitment() {
   const identitySecret = randomFieldElement();
-  const identityNullifier = randomFieldElement();
+  const identityNullifierSecret = randomFieldElement();
   
-  // Compute commitment: Poseidon(identitySecret, identityNullifier)
-  const commitment = await poseidonHashArray([identitySecret, identityNullifier]);
+  // Canonical History-hiding identity leaf: Poseidon(identitySecret).
+  const commitment = await poseidonHashArray([identitySecret]);
   
   return {
     identitySecret,
-    identityNullifier,
+    identityNullifierSecret,
     commitment: "0x" + commitment.toString(16).padStart(64, "0")
   };
 }
@@ -95,7 +95,7 @@ async function generateIdentityTree(identities) {
 async function generateIdentityProofForAction(identityData, treeRoot, merkleProof, actionId) {
   return await generateIdentityProof(
     identityData.identitySecret,
-    identityData.identityNullifier,
+    identityData.identityNullifierSecret,
     actionId,
     treeRoot,
     merkleProof
@@ -137,10 +137,10 @@ async function setupIdentityProofWithContract(zkIdentityContract, actionId) {
     return BigInt(poseidon.F.toObject(poseidon(inputs.map(x => BigInt(x)))));
   };
   
-  // Generate identity commitment using the same Poseidon as the contract
+  // Generate the canonical identity commitment using the circuit-compatible Poseidon.
   const identitySecret = randomFieldElement();
-  const identityNullifier = randomFieldElement();
-  const commitment = hash([identitySecret, identityNullifier]);
+  const identityNullifierSecret = randomFieldElement();
+  const commitment = hash([identitySecret]);
   const identityCommitmentHex = "0x" + commitment.toString(16).padStart(64, "0");
   
   // Get the identity tree address
@@ -196,7 +196,7 @@ async function setupIdentityProofWithContract(zkIdentityContract, actionId) {
   
   // Generate proof using the contract's root and JS tree proof
   const proofData = await generateIdentityProofForAction(
-    { identitySecret, identityNullifier, commitment: identityCommitmentHex },
+    { identitySecret, identityNullifierSecret, commitment: identityCommitmentHex },
     contractTreeRoot,
     { pathElements: merkleProof.siblings, pathIndices: merkleProof.pathIndices },
     actionIdBigInt

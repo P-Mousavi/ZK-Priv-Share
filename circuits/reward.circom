@@ -30,12 +30,16 @@ template ClaimReward(levels) {
     treeVerifier.pathIndices <== pathIndices;
     treeVerifier.pathElements <== pathElements;
 
-    // The calculated root must match the public root provided by the contract
-    // treeVerifier.root === root;
+    // A reward note can be claimed only from the public reward-tree root.
+    treeVerifier.root === root;
 
-    // C. Generate Nullifier Hash (To prevent double-claiming)
-    component nullifierHasher = Poseidon(1);
-    nullifierHasher.inputs[0] <== nullifier;
+    // C. Domain-separated reward nullifier.  It binds knowledge of the note
+    // secret to this exact reward note and cannot collide with state/stake/
+    // rating nullifier domains.
+    component nullifierHasher = Poseidon(3);
+    nullifierHasher.inputs[0] <== secret;
+    nullifierHasher.inputs[1] <== commHasher.out;
+    nullifierHasher.inputs[2] <== 0x524557415244;
 
     // The calculated nullifier must match the public nullifier provided
     nullifierHasher.out === nullifierHash;

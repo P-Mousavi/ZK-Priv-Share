@@ -40,15 +40,35 @@ interface IRewardVerifier {
     ) external view returns (bool);
 }
 
+interface IPrivateStateTree {
+    function submitPrivateCti(
+        uint[2] calldata a, uint[2][2] calldata b, uint[2] calldata c,
+        uint256 oldRoot, uint256 newRoot, uint256 nullifier, uint256 ctiCommitment
+    ) external;
+    function acceptReceipt(uint256 requestId, uint256 ctiCommitment, uint256 version, address recipient, bytes calldata signature) external;
+    function usedReceipts(bytes32 receiptHash) external view returns (bool);
+    function receiptDigest(uint256 requestId, uint256 ctiCommitment, uint256 version) external view returns (bytes32);
+}
+
+interface IAnonymousDisputeSlashing {
+    function confirmMaliciousFromDispute(uint256 ctiCommitment) external;
+}
+
 /**
  * @title ZKDataContract
  * @dev Manages the CTI sharing (Share Phase) and access (Request-Response Phase) with both ZK and non-ZK support.
  * Also handles the democratic dispute resolution process.
  */
 contract ZKDataContract {
+    address public immutable owner;
     IZKIdentity public zkIdentity;
     IIdentityContract public identityContract;
     IRewardVerifier public rewardVerifier;
+    IPrivateStateTree public privateStateTree;
+    IAnonymousDisputeSlashing public anonymousSlashing;
+    mapping(uint256 => uint256) public ctiCommitments;
+    mapping(uint256 => uint256) public ctiCommitmentVersions;
+    mapping(uint256 => bool) public privateResponseSubmitted;
     
     // Baby Jubjub field order (from circomlib) - must match the circuit's field
     uint256 constant FIELD_ORDER = 21888242871839275222246405745257275088548364400416034343698204186575808495617;
@@ -168,6 +188,11 @@ contract ZKDataContract {
         _;
     }
 
+    modifier onlyOwner() {
+        require(msg.sender == owner, "Only owner can call this");
+        _;
+    }
+
     // --- Internal Helper Functions ---
     function _verifyZKProof(
         uint256[2] calldata a,
@@ -188,6 +213,11 @@ contract ZKDataContract {
         if (d.votesForGuilty >= groupManagerThreshold) {
             // Outcome A: Guilty. Slash defendant, reward complainant.
             d.isOpen = false;
+            if (address(anonymousSlashing) != address(0)) {
+                uint256 ctiCommitment = ctiCommitments[accessRequests[d.accessRequestId].ctiId];
+                require(ctiCommitment != 0, "CTI not committed for anonymous slashing");
+                anonymousSlashing.confirmMaliciousFromDispute(ctiCommitment);
+            }
             if (d.isZKDispute) {
                 // ZK dispute: transfer delegate's deposit to accuser's payout commitment
                 // TODO: require accuser-provided denomination notes for this transfer as well.
@@ -220,6 +250,8 @@ contract ZKDataContract {
 
     // --- Events ---
     event CtiShared(uint256 indexed ctiId, address indexed producer);
+    event CtiCommitted(uint256 indexed ctiId, uint256 indexed ctiCommitment, uint256 version);
+    event PrivateResponseSubmitted(uint256 indexed requestId, uint256 indexed ctiCommitment, uint256 newRoot);
     event ZKRequestCreated(uint256 requestId, uint256 allocatedLeafIndex);
     event ZKResponseProvided(uint256 requestId);
     event RequestCreated(uint256 indexed requestId, address indexed consumer, address indexed allocatedDelegate);
@@ -241,6 +273,7 @@ contract ZKDataContract {
         address[] memory _initialManagers,
         uint256 _threshold
     ) {
+        owner = msg.sender;
         zkIdentity = IZKIdentity(_zkIdentity);
         identityContract = IIdentityContract(_identityContract);
         rewardVerifier = IRewardVerifier(_rewardVerifier);
@@ -260,6 +293,19 @@ contract ZKDataContract {
         _addAllowedDenomination(DENOMINATION_0_1_ETH);
         _addAllowedDenomination(DENOMINATION_0_01_ETH);
         _addAllowedDenomination(DENOMINATION_0_001_ETH);
+    }
+
+    function setPrivateStateTree(address stateTree) external onlyOwner {
+        require(stateTree != address(0), "Invalid state tree");
+        privateStateTree = IPrivateStateTree(stateTree);
+    }
+
+    /// @notice Configures the canonical dispute-to-anonymous-slashing bridge.
+    /// Existing legacy disputes remain available during migration but cannot
+    /// arbitrarily set malicious commitments on the slashing contract.
+    function setAnonymousSlashing(address slashing) external onlyOwner {
+        require(slashing != address(0), "Invalid anonymous slashing");
+        anonymousSlashing = IAnonymousDisputeSlashing(slashing);
     }
 
     function _addAllowedDenomination(uint256 _denomination) internal {
@@ -334,6 +380,18 @@ contract ZKDataContract {
         }
 
         emit CtiShared(ctiCounter, msg.sender);
+    }
+
+    /// @notice Register C_D = Poseidon(ctiId, version, SHA256(payload) mod Fr).
+    /// The payload stays off-chain; this contract stores only the compact commitment.
+    function commitCti(uint256 ctiId, uint256 ctiCommitment, uint256 version) external onlyRegistered {
+        require(ctiShares[ctiId].producer == msg.sender, "Not CTI producer");
+        require(ctiCommitment != 0, "Invalid CTI commitment");
+        require(version != 0, "Invalid CTI version");
+        require(ctiCommitments[ctiId] == 0, "CTI already committed");
+        ctiCommitments[ctiId] = ctiCommitment;
+        ctiCommitmentVersions[ctiId] = version;
+        emit CtiCommitted(ctiId, ctiCommitment, version);
     }
 
     // --- ZK REQUEST-RESPONSE PHASE ---
@@ -526,6 +584,35 @@ contract ZKDataContract {
         emit ResponseProvided(_requestId, _responseIpfsCid);
     }
 
+    /// @notice Bind a delivered CTI response to a verified history-hiding transition.
+    /// The circuit proves the private request/status membership; C_D is public only as
+    /// the compact integrity binding and no CTI payload/history is stored in the tree.
+    function submitPrivateResponse(
+        uint256 requestId,
+        uint[2] calldata a, uint[2][2] calldata b, uint[2] calldata c,
+        uint256 oldRoot, uint256 newRoot, uint256 nullifier, uint256 ctiCommitment
+    ) external onlyRegistered {
+        AccessRequest storage req = accessRequests[requestId];
+        require(req.allocatedDelegate == msg.sender, "Not the allocated delegate");
+        require(req.status == RequestStatus.Responded, "Response not delivered");
+        require(!privateResponseSubmitted[requestId], "Private response already submitted");
+        require(ctiCommitments[req.ctiId] == ctiCommitment, "CTI commitment mismatch");
+        require(address(privateStateTree) != address(0), "Private state tree not configured");
+        privateStateTree.submitPrivateCti(a, b, c, oldRoot, newRoot, nullifier, ctiCommitment);
+        privateResponseSubmitted[requestId] = true;
+        emit PrivateResponseSubmitted(requestId, ctiCommitment, newRoot);
+    }
+
+    function acceptCtiReceipt(uint256 requestId, uint256 version, bytes calldata signature) external {
+        AccessRequest storage req = accessRequests[requestId];
+        require(req.allocatedDelegate != address(0), "Request does not exist");
+        uint256 commitment = ctiCommitments[req.ctiId];
+        require(commitment != 0, "CTI not committed");
+        require(ctiCommitmentVersions[req.ctiId] == version, "CTI version mismatch");
+        require(address(privateStateTree) != address(0), "Private state tree not configured");
+        privateStateTree.acceptReceipt(requestId, commitment, version, req.allocatedDelegate, signature);
+    }
+
     // --- REGULATION PHASE ---
 
     /**
@@ -542,11 +629,42 @@ contract ZKDataContract {
         DisputeReason _reason,
         string calldata _evidenceCid
     ) external onlyRegistered {
+        _raiseDispute(_requestId, _defendant, _reason, _evidenceCid, msg.sender);
+    }
+
+    /// @notice Raise a normal dispute only after the delegate's receipt for C_D exists.
+    /// This connects the private transition/receipt evidence to the established vote
+    /// and slashing path without revealing the CTI itself.
+    function raiseDisputeWithReceipt(
+        uint256 _requestId,
+        address _defendant,
+        DisputeReason _reason,
+        string calldata _evidenceCid,
+        uint256 _version
+    ) external onlyRegistered {
+        AccessRequest storage req = accessRequests[_requestId];
+        require(_defendant == req.allocatedDelegate, "Receipt must bind delegate");
+        require(privateResponseSubmitted[_requestId], "Private response not submitted");
+        uint256 commitment = ctiCommitments[req.ctiId];
+        require(commitment != 0 && address(privateStateTree) != address(0), "CTI not committed");
+        require(ctiCommitmentVersions[req.ctiId] == _version, "CTI version mismatch");
+        bytes32 receipt = privateStateTree.receiptDigest(_requestId, commitment, _version);
+        require(privateStateTree.usedReceipts(receipt), "CTI receipt not accepted");
+        _raiseDispute(_requestId, _defendant, _reason, _evidenceCid, msg.sender);
+    }
+
+    function _raiseDispute(
+        uint256 _requestId,
+        address _defendant,
+        DisputeReason _reason,
+        string calldata _evidenceCid,
+        address _complainant
+    ) internal {
         AccessRequest storage req = accessRequests[_requestId];
         CtiShare storage cti = ctiShares[req.ctiId];
         
         // Check complainant is part of the transaction
-        require(msg.sender == req.consumer || msg.sender == cti.producer, "Not party to this request");
+        require(_complainant == req.consumer || _complainant == cti.producer, "Not party to this request");
         
         // Check defendant is part of the transaction
         require(_defendant == req.allocatedDelegate || _defendant == cti.producer, "Invalid defendant");
@@ -559,14 +677,14 @@ contract ZKDataContract {
 
         disputeCounter++;
         Dispute storage d = disputes[disputeCounter];
-        d.complainant = msg.sender;
+        d.complainant = _complainant;
         d.defendant = _defendant;
         d.accessRequestId = _requestId;
         d.reason = _reason;
         d.evidenceCid = _evidenceCid;
         d.isOpen = true;
 
-        emit DisputeRaised(disputeCounter, msg.sender, _defendant);
+        emit DisputeRaised(disputeCounter, _complainant, _defendant);
     }
 
     /**
