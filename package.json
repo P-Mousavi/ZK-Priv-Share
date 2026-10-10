@@ -12,6 +12,8 @@
     "test:all": "npm run test:contracts && npm run test:history-hiding && npm run test:circuits",
     "build:groth16": "bash scripts/buildAllGroth16Artifacts.sh",
     "verify:groth16": "bash scripts/verifyGroth16Artifacts.sh",
+    "benchmark:comparative": "node scripts/benchmarks/comparative/run.js",
+    "test:comparative": "mocha --no-config test/comparative-benchmarks.test.js",
     "benchmark:linkability": "hardhat test test/benchmarks/Linkability.bench.js",
     "benchmark:identity-scalability": "hardhat test test/benchmarks/IdentityRegistrationScalability.bench.js",
     "benchmark:reward-activity": "hardhat test test/benchmarks/RewardNoteActivity.bench.js",

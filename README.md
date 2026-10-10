@@ -181,3 +181,9 @@ See [BENCHMARK_README.md](BENCHMARK_README.md) for benchmark purpose, output fil
 - Request allocation uses block-derived pseudo-randomness and is not secure randomness.
 - The build script creates a fresh demo Powers of Tau setup each run. Use a trusted ceremony and reproducible artefact process for any real deployment.
 - CTI content and CIDs are off-chain; the contracts do not validate their availability or correctness.
+
+## Comparative deployment and computation benchmarks
+
+Run `npm run benchmark:comparative` after the generated Groth16 artifacts are available (`npm run build:groth16` if needed). The suite compiles the original non-ZK Priv-Share contracts directly from Git revision `df954fd862862e65a2e66af3a18d1526d78bfd7e`, measures the complete canonical History-Hiding deployment, and runs 20 measured proving trials for each of identity, state, rating, slashing and reward. Run `npm run test:comparative` for measurement-rule checks.
+
+Each run creates a fresh `benchmark-results/comparative/<run>/` containing deployment and computation JSON/CSV, a comparative report, source/artifact hashes, host/compiler metadata, production-verifier checks and execution logs. Existing benchmark datasets are preserved. Witness generation, proving, serialization and initialization are reported separately. Neither proof-of-concept implements actual off-chain CTI processing; original baseline local EVM timings are reported separately and do not support a proof-overhead percentage. See [the benchmark guide](BENCHMARK_README.md) and [implementation audit](docs/comparative-benchmark-audit.md) for definitions, contract sets and limitations.

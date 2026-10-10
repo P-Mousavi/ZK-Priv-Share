@@ -184,3 +184,42 @@ npm run benchmark:history-hiding
 Results from the canonical suite are written below `benchmark-results/history-hiding/`: `state-results.json`, `state-scale.json`, `real-proof-verification.json` / `.csv`, and `canonical-lifecycle-real-proof.json` / `.csv`. `npm run benchmark:history-hiding:extended` writes the separate mock-verifier outputs. The current build script uses a 2¹⁵ Powers of Tau setup. These locally generated ceremony artifacts are demonstration-only, not production ceremony material.
 
 The state-scale benchmark currently records two samples per scale (N=1, 10, 50, and 100); real-proof verifier and canonical lifecycle measurements record three samples. State-scale `fullProve` timing combines witness generation and proving, and compilation/witness-generation timings are not currently separated.
+
+## Original Priv-Share versus canonical History-Hiding deployment/computation
+
+```bash
+# Reuse existing generated artifacts; build only if absent/outdated.
+npm run build:groth16
+npm run verify:groth16
+npm run test:comparative
+npm run benchmark:comparative
+
+# Optional shorter exploratory run (report its reduced sample count).
+COMPARATIVE_TRIALS=3 npm run benchmark:comparative
+```
+
+The suite requires Node.js, existing dependencies, local Git history containing `df954fd862862e65a2e66af3a18d1526d78bfd7e`, a cached/available Hardhat Solidity compiler, and generated canonical circuit artifacts under `circuits/build/artifacts/`. It reads baseline sources directly from the initial revision rather than using the modified current IdentityContract or intermediate ZK branch. Both architectures use the current contract build's exact compiler and optimizer settings. Missing source/artifacts or failed proof checks fail the run; measurements are never replaced by estimates.
+
+Outputs go into a fresh `benchmark-results/comparative/<timestamp>-<pid>/`. `COMPARATIVE_OUT` may select a new, empty run subdirectory within that directory. The runner refuses overwrites and hashes all existing legacy/canonical datasets before and after execution. Individual entrypoints under `scripts/benchmarks/comparative/` require this environment variable and do not replace the old commands.
+
+Each successful run produces:
+
+- `manifest.json`: environment, revision, working-tree source hashes and preservation hashes.
+- `deployment.json` / `.csv`: each actual deployed contract, linked libraries, constructor inputs, runtime/creation sizes, compiler settings, receipt gas, explicit aggregates and separate initialization gas. Constructor-created IdentityTree gas is included in ZKIdentity; all 17 canonical contract addresses are counted and checked against the runtime size limit, with 16 deployment transactions. The original baseline deploys two contracts. No registration costs are included.
+- `offchain.json` / `.csv`: 20 measured trials per canonical circuit by default, one unmeasured warm-up, witness/proving/combined/serialization/worker wall times, compact proof JSON and 256-byte Solidity proof sizes, and OS peak full-worker RSS where supported. Metrics include sample count, median, mean, min, max and population standard deviation plus raw samples and artifact hashes.
+- `baseline-operations.json` / `.csv`: original address registration, CTI publication, deposit slashing and response/reward operation timings via local EVM simulation. These include ethers/provider/EVM execution, exclude setup, and discard state changes between trials.
+- `proof-<circuit>.json` and `verification.json`: one measured proof per circuit verified by the actual generated production Solidity verifier, with malformed-proof rejection and verification gas. Local verification is excluded from proving-stage time.
+- `comparison.json` / `.csv` and `report.md`: complete-architecture deployment cost differences, contract sizes and computation tables. Percentages use `(history - baseline) / baseline * 100` only for semantically comparable positive baseline metrics.
+- Per-command `.log` files and `execution.json`: exact commands, exit codes and preservation checks. Failed runs retain their logs/results and are not successful datasets.
+
+Stage timing includes artifact reads and witness file I/O, excludes input preparation/startup/serialization/verification; worker wall time records these separately. Peak RSS includes the complete fresh worker process, its startup and local verification, and cannot be interpreted as proving-stage memory alone. Circuit compilation, trusted setup and proving-key generation are outside repeated operation measurements. Inputs are fixed generated fixtures; proof randomness means JSON byte counts can vary. Timing and memory depend on host scheduling and cache behavior.
+
+The user confirmed neither proof-of-concept implements actual off-chain CTI processing. No baseline off-chain client, standalone rating, anonymous membership proof or shielded reward claim exists. The suite marks these metrics unavailable instead of zero and never calculates a time overhead between baseline EVM execution and Groth16 proving. Publication, slashing and rewards have different inputs and semantics across architectures. Deployment totals compare the explicitly listed complete sets and do not isolate history hiding from all other privacy/features. The canonical identity root-equality constraint remains intentionally disabled; benchmarks preserve and disclose that existing exception.
+
+See [the implementation audit](docs/comparative-benchmark-audit.md). Canonical regression benchmarks were also run in a temporary repository copy so their ordinary output definitions could be checked without overwriting existing results. The new commands preserve all earlier benchmark commands.
+
+### Recorded execution
+
+The [20-trial report](benchmark-results/comparative/2026-10-10T11-38-53.918Z-357337/report.md) records 100 successful measured proofs across the five circuits. Deployment totals were 3,137,878 gas for original Priv-Share and 17,460,509 gas for canonical History-Hiding, an increase of 14,322,631 gas (456.44%) for the complete architecture sets. Combined witness/proving medians were 661.90 ms (identity), 1,326.65 ms (state), 733.56 ms (rating), 1,028.27 ms (slashing), and 705.07 ms (reward). These are measurements on the host recorded in the dataset, not general performance guarantees.
+
+A separate two-trial repeat at `benchmark-results/comparative/2026-10-10T11-41-43.861Z-359856/` confirmed matching JSON structure, CSV headers and exact deployment totals. The primary run's `validation.json`, `reproducibility.json`, `regression.json` and regression logs document finite-value checks, compiler equivalence, dataset preservation, production-verifier acceptance/malformed-proof rejection, and passing suites: 126 contract tests, 29 circuit tests, one canonical end-to-end test, four canonical benchmarks and four new measurement-rule tests. Failed development runs are retained with `execution.json.success: false` and must not be used as result datasets.

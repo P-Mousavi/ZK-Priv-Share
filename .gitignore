@@ -3,6 +3,7 @@ deployments/
 circuits/build/*
 node_modules/
 *.log
+!benchmark-results/comparative/**/*.log
 .DS_Store
 Thumbs.db
 dist/
