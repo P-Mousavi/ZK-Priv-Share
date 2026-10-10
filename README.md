@@ -2,7 +2,12 @@
 
 Proof-of-concept smart-contract and Circom implementation of privacy-preserving cyber-threat-intelligence (CTI) sharing. It combines an organisation identity registry, Poseidon-based identity commitments, Groth16 proof verification, CTI request/response and dispute workflows, and an experimental fixed-denomination reward-note claim flow.
 
-This repository is for local development and research. It is not production-ready: the identity circuit intentionally does not constrain its supplied Solidity Merkle root because the on-chain and circomlib Poseidon trees are not yet compatible, and reward-tree root management is test-only. See [Security and current limitations](#security-and-current-limitations).
+This repository is for local development and research. It is not
+production-ready: `identity.circom` intentionally does not constrain its
+supplied Merkle root because the on-chain identity tree and circomlib tree are
+not yet compatible. The canonical History-hiding reward tree is maintained on
+chain by `ShieldedRewardTree`; older `ZKData` reward-root helpers are legacy.
+See [Security and current limitations](#security-and-current-limitations).
 
 The history-hiding extension and its explicit proof-of-concept boundary are
 documented in [HISTORY_HIDING_README.md](HISTORY_HIDING_README.md).
@@ -37,11 +42,16 @@ The circuits use Poseidon and the identity circuit has depth 7 (128 leaves); the
 3. A ZK responder supplies a Groth16 identity proof whose `actionId` is bound to the request ID.
 4. Managers can resolve conventional disputes by threshold voting. ZK dispute and ZK voting entry points also use nullifiers to guard against replay.
 
-### Experimental reward-note flow
+### Legacy reward-note flow
 
 `provideResponseZK` accepts commitments and fixed denominations, verifies their total equals the configured CTI reward, and stores each commitment's denomination. Allowed denominations are 0.001, 0.01, 0.1, 1, and 10 ETH. A reward proof exposes `[root, denomination, nullifierHash]`; `claimReward` verifies it, prevents reuse of the payout nullifier, pays an optional relayer fee, and sends the remainder to a recipient address.
 
-The contract does **not** currently insert notes into a reward Merkle tree or derive reward roots. `setRewardTreeRoot` merely registers a root while `testingMode` is enabled, so claims are only suitable for tests and benchmarks until production reward-tree management is implemented.
+This address-linked `ZKData` reward flow is retained for migration and
+regression tests only. It is not the canonical History-hiding reward path.
+The canonical path is `ShieldedRewardTree`, which funds and appends opaque
+fixed-denomination note commitments to its own Poseidon root and accepts only
+real generated reward proofs against that current root. See
+`HISTORY_HIDING_README.md`.
 
 ## Prerequisites
 
@@ -165,8 +175,8 @@ See [BENCHMARK_README.md](BENCHMARK_README.md) for benchmark purpose, output fil
 ## Security and current limitations
 
 - This is a prototype, not an audited protocol.
-- Both circuits leave the calculated Merkle-root equality constraint disabled. The identity-response contract path also skips identity-root validation because its on-chain Poseidon implementation does not match circomlib exactly. Consequently, the current proof flows do not provide the intended membership security guarantee.
-- Reward-note commitments are recorded but no contract-maintained reward Merkle tree exists. Reward roots can only be registered through `setRewardTreeRoot` in `testingMode`.
+- Only `identity.circom` leaves the calculated Merkle-root equality constraint disabled. This is an explicit benchmark-PoC exception; identity membership is therefore not a complete security guarantee. State, stake, rating, slashing, and reward root constraints remain enabled in their canonical circuits.
+- `ShieldedRewardTree` is the canonical contract-maintained reward tree. The older `ZKData` reward mappings and `setRewardTreeRoot`/`testingMode` path are legacy test/migration code and must not be used as a production or canonical History-hiding flow.
 - `testingMode`, `setZkIdentity`, reward deposit helpers, and `setRewardTreeRoot` are test helpers and are not access-controlled beyond the mode check. Do not deploy this contract as-is.
 - Request allocation uses block-derived pseudo-randomness and is not secure randomness.
 - The build script creates a fresh demo Powers of Tau setup each run. Use a trusted ceremony and reproducible artefact process for any real deployment.

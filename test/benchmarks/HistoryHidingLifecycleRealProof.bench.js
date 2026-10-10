@@ -1,0 +1,112 @@
+const { expect } = require("chai");
+const { ethers } = require("hardhat");
+const { groth16 } = require("snarkjs");
+const { buildPoseidon } = require("circomlibjs");
+const { IncrementalMerkleTree } = require("@zk-kit/incremental-merkle-tree");
+const fs = require("fs");
+const path = require("path");
+const H = require("../../scripts/helpers/ctiCommitment");
+
+const ARTIFACTS = path.join(__dirname, "../../circuits/build/artifacts");
+const OUT = path.join(__dirname, "../../benchmark-results/history-hiding");
+const SAMPLES = 3;
+const file = (circuit, extension) => path.join(ARTIFACTS, circuit, `${circuit}.${extension}`);
+const merklePath = (proof) => ({ pathElements: proof.siblings.map((node) => String(node[0])), pathIndices: proof.pathIndices });
+
+function stats(values) {
+  const sorted = [...values].sort((a, b) => a - b);
+  const total = values.reduce((sum, value) => sum + value, 0);
+  return { samples: values.length, min: sorted[0], median: sorted[Math.floor(sorted.length / 2)], mean: total / values.length, max: sorted.at(-1) };
+}
+
+async function prove(circuit, input) {
+  const { proof, publicSignals } = await groth16.fullProve(input, file(circuit, "wasm"), file(circuit, "zkey"));
+  const values = JSON.parse(`[${await groth16.exportSolidityCallData(proof, publicSignals)}]`);
+  return { a: values[0], b: values[1], c: values[2], signals: values[3].map(BigInt) };
+}
+
+describe("History-hiding canonical lifecycle real-proof benchmark", function () {
+  this.timeout(300000);
+
+  it("records repeated production-proof transaction metrics", async function () {
+    const measurements = { rewardInsertionGas: [], rewardClaimGas: [], ratingVerificationGas: [], slashingVerificationGas: [], lifecycleGas: [], lifecycleWallMs: [] };
+    for (let sample = 0; sample < SAMPLES; sample++) {
+      const started = process.hrtime.bigint();
+      const [owner, claimant, issuer, relayer, manager1, manager2] = await ethers.getSigners();
+      const poseidon = await buildPoseidon();
+      const hash = (inputs) => BigInt(poseidon.F.toString(poseidon(inputs.map(BigInt))));
+      const secret = 100n + BigInt(sample), nullifierSecret = 200n + BigInt(sample);
+      const identity = await H.computeIdentityCommitment(secret);
+      const identities = new IncrementalMerkleTree(hash, 7, 0n, 2); identities.insert(identity);
+      const idWitness = merklePath(identities.createProof(0));
+
+      const PoseidonT3 = await ethers.getContractFactory("poseidon-solidity/PoseidonT3.sol:PoseidonT3");
+      const poseidonT3 = await PoseidonT3.deploy();
+      const Incremental = await ethers.getContractFactory("@zk-kit/incremental-merkle-tree.sol/IncrementalBinaryTree.sol:IncrementalBinaryTree", { libraries: { PoseidonT3: await poseidonT3.getAddress() } });
+      const incremental = await Incremental.deploy();
+      const ZKIdentity = await ethers.getContractFactory("ZKIdentity", { libraries: { IncrementalBinaryTree: await incremental.getAddress() } });
+      const identityRegistry = await ZKIdentity.deploy();
+      await identityRegistry.registerIdentity(identity, { value: ethers.parseEther("1") });
+
+      const stakeAmount = 1n, stakeRandomness = 300n + BigInt(sample);
+      const stake = await H.computeStakeCommitment(identity, stakeAmount, stakeRandomness);
+      const Registry = await ethers.getContractFactory("AnonymousStakeRegistry", { libraries: { IncrementalBinaryTree: await incremental.getAddress() } });
+      const stakes = await Registry.deploy(stakeAmount, owner.address);
+      await stakes.lockStake(stake, { value: stakeAmount });
+      const stakeTree = new IncrementalMerkleTree(hash, 7, 0n, 2); stakeTree.insert(stake);
+      const stakeWitness = merklePath(stakeTree.createProof(0));
+
+      const ctiId = 1000n + BigInt(sample), requestId = 2000n + BigInt(sample), ctiPayload = `benchmark-cti-${sample}`;
+      const cti = await H.computeCtiCommitment(ctiId, 1n, ctiPayload);
+      const oldTree = new IncrementalMerkleTree(hash, 7, 0n, 2), newTree = new IncrementalMerkleTree(hash, 7, 0n, 2);
+      oldTree.insert(await H.computeStateLeaf(requestId, 0n, cti)); newTree.insert(await H.computeStateLeaf(requestId, 1n, cti));
+      const stateWitness = merklePath(oldTree.createProof(0));
+      const stateNf = await H.computeStateNullifier(secret, cti), accountabilityRandomness = 400n + BigInt(sample);
+      const accountability = await H.computeAccountabilityCommitment(stake, cti, accountabilityRandomness);
+      const stateProof = await prove("state", {
+        identitySecret: String(secret), identityPathElements: idWitness.pathElements, identityPathIndices: idWitness.pathIndices,
+        stakeAmount: "1", stakeRandomness: String(stakeRandomness), stakePathElements: stakeWitness.pathElements, stakePathIndices: stakeWitness.pathIndices,
+        accountabilityRandomness: String(accountabilityRandomness), ctiId: String(ctiId), version: "1", ctiHash: String(H.hashCtiData(ctiPayload)), requestId: String(requestId), statePathElements: stateWitness.pathElements, statePathIndices: stateWitness.pathIndices,
+        identityRoot: String(identities.root), stakeRoot: String(stakeTree.root), oldStateRoot: String(oldTree.root), newStateRoot: String(newTree.root), stateNullifier: String(stateNf), ctiCommitment: String(cti), accountabilityCommitment: String(accountability)
+      });
+      const StateVerifier = await ethers.getContractFactory("contracts/StateVerifier.sol:Groth16Verifier"); const stateVerifier = await StateVerifier.deploy();
+      const State = await ethers.getContractFactory("PrivateStateTree"); const state = await State.deploy(oldTree.root, await stateVerifier.getAddress()); await state.setStakeRegistry(await stakes.getAddress());
+      const SlashVerifier = await ethers.getContractFactory("contracts/SlashingVerifier.sol:Groth16Verifier"); const slashVerifier = await SlashVerifier.deploy();
+      const Slashing = await ethers.getContractFactory("AnonymousSlashing"); const slashing = await Slashing.deploy(await slashVerifier.getAddress(), await stakes.getAddress()); await stakes.setSlasher(await slashing.getAddress()); await slashing.setStateTree(await state.getAddress());
+      const IdentityVerifier = await ethers.getContractFactory("contracts/Verifier.sol:Groth16Verifier"); const identityVerifier = await IdentityVerifier.deploy();
+      const PoseidonT4 = await ethers.getContractFactory("poseidon-solidity/PoseidonT4.sol:PoseidonT4"); const poseidonT4 = await PoseidonT4.deploy();
+      const Access = await ethers.getContractFactory("AnonymousCtiAccess", { libraries: { PoseidonT4: await poseidonT4.getAddress() } }); const access = await Access.deploy(await state.getAddress(), await identityVerifier.getAddress(), await slashing.getAddress());
+      const Resolver = await ethers.getContractFactory("AnonymousDisputeResolver"); const resolver = await Resolver.deploy(await access.getAddress(), [manager1.address, manager2.address], 2); await access.setDisputeResolver(await resolver.getAddress()); await slashing.setDisputeResolver(await access.getAddress());
+
+      const stateReceipt = await (await access.publishCti(stateProof.a, stateProof.b, stateProof.c, ...stateProof.signals)).wait();
+      const accessProof = await prove("identity", { identitySecret: String(secret), identityNullifierSecret: String(nullifierSecret), ...idWitness, root: String(identities.root), actionId: String(requestId) });
+      const [accessNullifier, accessRoot, accessRequest] = accessProof.signals;
+      await access.requestAccess(accessProof.a, accessProof.b, accessProof.c, accessRoot, accessNullifier, accessRequest, cti);
+      await access.connect(relayer).recordDelivery(requestId, 9000n + BigInt(sample));
+      await access.connect(claimant).recordReceptionAcknowledgement(requestId, newTree.root, stateNf, await H.computeAcknowledgement(cti, newTree.root, stateNf));
+      const ratingNf = await H.computeRatingNullifier(secret, cti);
+      const ratingProof = await prove("rating", { identitySecret: String(secret), ...idWitness, identityRoot: String(identities.root), ctiCommitment: String(cti), ratingNullifier: String(ratingNf), rating: "1" });
+      const RatingVerifier = await ethers.getContractFactory("contracts/RatingVerifier.sol:Groth16Verifier"); const ratingVerifier = await RatingVerifier.deploy(); const Rating = await ethers.getContractFactory("AnonymousRating"); const rating = await Rating.deploy(await ratingVerifier.getAddress());
+      const ratingReceipt = await (await rating.rate(ratingProof.a, ratingProof.b, ratingProof.c, ...ratingProof.signals)).wait();
+      await access.connect(claimant).raiseDispute(requestId, 7000n + BigInt(sample), 8000n + BigInt(sample)); await resolver.connect(manager1).vote(requestId, 7000n + BigInt(sample), true); await resolver.connect(manager2).vote(requestId, 7000n + BigInt(sample), true);
+      const stakeNf = await H.computeStakeNullifier(secret, stake);
+      const slashProof = await prove("slashing", { identitySecret: String(secret), identityPathElements: idWitness.pathElements, identityPathIndices: idWitness.pathIndices, identityRoot: String(identities.root), stakeAmount: "1", stakeRandomness: String(stakeRandomness), stakePathElements: stakeWitness.pathElements, stakePathIndices: stakeWitness.pathIndices, accountabilityRandomness: String(accountabilityRandomness), maliciousCtiCommitment: String(cti), stakeRoot: String(stakeTree.root), accountabilityCommitment: String(accountability), stakeNullifier: String(stakeNf), stakeCommitment: String(stake) });
+      const slashReceipt = await (await slashing.slash(slashProof.a, slashProof.b, slashProof.c, ...slashProof.signals)).wait();
+
+      const denomination = ethers.parseEther("1"), rewardSecret = 500n + BigInt(sample), noteNullifier = 600n + BigInt(sample), note = await H.poseidonHash([denomination, rewardSecret, noteNullifier]);
+      const RewardVerifier = await ethers.getContractFactory("contracts/RewardVerifier.sol:Groth16Verifier"); const rewardVerifier = await RewardVerifier.deploy(); const Reward = await ethers.getContractFactory("ShieldedRewardTree", { libraries: { IncrementalBinaryTree: await incremental.getAddress() } }); const reward = await Reward.deploy(await rewardVerifier.getAddress()); await reward.setIssuer(issuer.address, true);
+      const issueReceipt = await (await reward.connect(issuer).issueRewardNote(note, denomination, { value: denomination })).wait();
+      const rewards = new IncrementalMerkleTree(hash, 5, 0n, 2); rewards.insert(note);
+      const rewardNf = await H.computeRewardNullifier(rewardSecret, note);
+      const rewardProof = await prove("reward", { secret: String(rewardSecret), nullifier: String(noteNullifier), ...merklePath(rewards.createProof(0)), root: String(rewards.root), denomination: String(denomination), nullifierHash: String(rewardNf) });
+      const claimReceipt = await (await reward.connect(claimant).claimReward(rewardProof.a, rewardProof.b, rewardProof.c, ...rewardProof.signals)).wait();
+      const totalGas = stateReceipt.gasUsed + ratingReceipt.gasUsed + slashReceipt.gasUsed + issueReceipt.gasUsed + claimReceipt.gasUsed;
+      measurements.rewardInsertionGas.push(Number(issueReceipt.gasUsed)); measurements.rewardClaimGas.push(Number(claimReceipt.gasUsed)); measurements.ratingVerificationGas.push(Number(ratingReceipt.gasUsed)); measurements.slashingVerificationGas.push(Number(slashReceipt.gasUsed)); measurements.lifecycleGas.push(Number(totalGas)); measurements.lifecycleWallMs.push(Number(process.hrtime.bigint() - started) / 1e6);
+    }
+    const result = { samples: SAMPLES, verification: "production generated Groth16 proofs and generated Solidity verifiers only", metrics: Object.fromEntries(Object.entries(measurements).map(([name, values]) => [name, stats(values)])) };
+    fs.mkdirSync(OUT, { recursive: true });
+    fs.writeFileSync(path.join(OUT, "canonical-lifecycle-real-proof.json"), `${JSON.stringify(result, null, 2)}\n`);
+    const csv = ["metric,samples,min,median,mean,max", ...Object.entries(result.metrics).map(([name, value]) => [name, value.samples, value.min, value.median, value.mean, value.max].join(","))];
+    fs.writeFileSync(path.join(OUT, "canonical-lifecycle-real-proof.csv"), `${csv.join("\n")}\n`);
+  });
+});

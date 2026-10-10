@@ -6,6 +6,19 @@ transaction metadata, zero-knowledge proofs, state roots, nullifiers and
 required aggregate values. The goal is to prevent direct reconstruction of
 the semantic CTI workflow from those public values.
 
+## Status
+
+| Status | Scope |
+| --- | --- |
+| Implemented | Canonical commitment-only state, access, acknowledgement, rating, dispute/slashing, and shielded-reward contracts described below |
+| Tested | Generated Groth16 artifact checks, Poseidon compatibility gate, security matrix, and canonical real-proof E2E |
+| Benchmark-tested | Real-proof verifier metrics, state transition gas, N=1/10/50/100 state scale, and three-sample canonical lifecycle metrics |
+| Legacy | Address-linked `ZKData` sharing/rewards, ECDSA receipt handling, test helpers, and mock-verifier storage microbenchmarks |
+| Future work | Identity-root enforcement, production ceremony provenance, and split compile/witness/proving benchmarks |
+
+Implementation detail is maintained in `docs/history-hiding.md`; the
+enforcement matrix is in `docs/history-hiding-security-matrix.md`.
+
 ## Architecture
 
 Three trees retain separate roles: the identity tree establishes anonymous
@@ -40,7 +53,7 @@ constants shared by Circom and `scripts/helpers/ctiCommitment.js`:
 The accountability binding is
 `Poseidon(stakeCommitment, ctiCommitment, accountabilityRandomness)`. It is
 separate from the CTI commitment, so normal submissions do not publish a
-durable stake-to-CTI link. The off-chain reception acknowledgement is
+durable stake-to-CTI link. The canonical reception acknowledgement is
 `Poseidon(ctiCommitment, newStateRoot, stateNullifier)`.
 
 The generated reward circuit and `RewardVerifier.sol` enforce the Reward row
@@ -68,10 +81,13 @@ commitment.
 
 ## Dispute and anonymous slashing
 
-`ZKData` can be configured as the dispute resolver for `AnonymousSlashing`.
-When a CTI dispute reaches the existing guilty threshold, it forwards the CTI
-commitment to the slashing contract; neither the slashing transaction nor its
-events require the participant identity. `slashing.circom` and the generated
+`AnonymousDisputeResolver` is the canonical threshold-authorized resolver for
+opaque disputes raised through `AnonymousCtiAccess`. Once its configured
+manager threshold is reached, it calls the access contract, which forwards a
+malicious CTI commitment to `AnonymousSlashing`; neither the slashing
+transaction nor its events require the participant identity. `ZKData` may
+still be configured as a legacy migration resolver, but is not used by the
+canonical E2E. `slashing.circom` and the generated
 `SlashingVerifier.sol` prove the funded stake-tree membership, prior recorded
 accountability commitment, CTI binding, and domain-separated `NF_stake`.
 
@@ -83,8 +99,9 @@ and records only the opaque CTI commitment. `requestAccess` verifies the
 generated identity proof against an opaque request commitment and consumes its
 access nullifier. Delivery and disputes are recorded as commitments, without
 producer, consumer, delegate, CTI payload, or IPFS metadata in canonical
-storage/events. A configured dispute resolver can forward a malicious outcome
-to `AnonymousSlashing`.
+storage/events. Delivery may be relayed, acknowledgement is recorded without
+an address, and the configured threshold resolver can forward a malicious
+outcome to `AnonymousSlashing`.
 
 `ZKData.shareCti`, address-linked access requests, and their legacy events
 remain for migration/regression compatibility only; they are not used by the
@@ -149,6 +166,25 @@ The benchmark PoC retains the commented `treeVerifier.root === root` line in
 This documented limitation does not block the other compatibility checks or
 History-hiding benchmarks.
 
+## Canonical real-proof end-to-end test
+
+Run the Phase 13 acceptance flow with:
+
+```bash
+npm run test:history-hiding
+```
+
+`test/history-hiding/history-hiding.e2e.test.js` creates coordinated witnesses
+and fresh Groth16 proofs from the generated artifacts. It registers an opaque
+identity commitment and funded stake, applies the atomic private state update,
+records accountability, publishes/accesses CTI, records the Poseidon reception
+acknowledgement, rates the CTI, resolves an anonymous dispute through the
+threshold resolver, and slashes the proved stake. A separately authorized
+issuer later inserts the fixed-denomination reward note, which is then claimed
+with a real proof. It also rejects repeated state publication, reward claim,
+rating, and slashing actions. No mock verifier is deployed or used by this
+canonical E2E flow.
+
 ## Public/private boundary
 
 | Component | Public | Private |
@@ -158,7 +194,7 @@ History-hiding benchmarks.
 | Slashing proof | malicious CTI, accountability commitment, stake nullifier/commitment | identity secret/path and stake randomness |
 | Rating proof | identity root, CTI commitment, rating nullifier, binary rating | identity secret/path |
 | Reward proof | reward root, denomination, reward nullifier | note secret/nullifier/path |
-| Reception acknowledgement | no on-chain identity record | producer-held Poseidon receipt |
+| Reception acknowledgement | request commitment and Poseidon acknowledgement; no recipient identity | recipient identity and delivery content |
 
 `PrivateStateTree` supports the full `state.circom` path through
 `submitPrivateCtiWithStateProof` and retains the legacy four-public-input
@@ -198,16 +234,18 @@ The history-hiding benchmark command writes independent measurements to
 | File | Measurement |
 | --- | --- |
 | `state-results.json` | real `state.circom` proving, verifier gas, transition gas, storage |
+| `state-scale.json` | repeated real state-proof/tree construction measurements at N=1, 10, 50, 100 |
 | `slashing.json` | exceptional slash transaction and stake-consumption cost |
 | `rating.json` | first, later, and duplicate-rating paths |
 | `reward-integration.json` | state submission → asynchronous note mint → relayed claim |
 | `metadata-history.json` | ABI-derived legacy versus commitment-only public metadata |
 | `end-to-end.json` | state, rating, and slashing lifecycle gas |
+| `real-proof-verification.json` / `.csv` | repeated local verification, proof size, and EVM verification gas for every generated canonical proof |
+| `canonical-lifecycle-real-proof.json` / `.csv` | repeated production-proof reward insertion/claim, rating, slashing, lifecycle gas, and lifecycle wall time |
 
-The state benchmark uses the real generated Groth16 verifier. The independent
-rating and slashing transaction benchmarks deliberately use the local test
-verifier so their results isolate enforcement/storage cost from ceremony- and
-machine-dependent proof generation time.
+`npm run benchmark:history-hiding` runs only real-proof benchmark files. The
+older `HistoryHidingExtended.bench.js` remains an explicitly labelled legacy
+storage microbenchmark and is excluded because it uses accept-all verifiers.
 
 `scripts/build.sh` copies each generated `.r1cs`, `.wasm`, `.zkey`, verifying
 key, proof, public inputs, and Solidity verifier to
@@ -216,6 +254,8 @@ key, proof, public inputs, and Solidity verifier to
 ## Benchmark interpretation
 
 History-hiding measurements must remain separate from legacy benchmark output.
-They measure proof/witness time, proof size, verifier and transition gas, and
-the public metadata surface. They do not claim that roots, nullifiers, proofs,
-or blockchain transaction metadata disappear.
+They measure `fullProve` time, proof size, verifier and transition gas, tree
+construction scale, and lifecycle gas. `fullProve` currently combines witness
+generation and proving; standalone compilation and witness-generation timing
+is future work. These measurements do not claim that roots, nullifiers,
+proofs, or blockchain transaction metadata disappear.

@@ -7,10 +7,9 @@ const {
   computeNullifier, computeStakeCommitment
 } = require("../../scripts/helpers/ctiCommitment");
 
-// These benchmarks intentionally use the local accept-all verifier for the
-// contract-operation measurements. Real State Groth16 verification is covered
-// separately by HistoryHidingState.bench.js; keeping exceptional slashing and
-// rating measurements independent avoids attributing state-proof time to them.
+// Legacy enforcement/storage microbenchmarks. They intentionally use local
+// accept-all verifiers and are excluded from benchmark:history-hiding. They
+// must never be read as final cryptographic-performance measurements.
 const PROOF = [[1n, 2n], [[1n, 2n], [3n, 4n]], [5n, 6n]];
 const OUT = path.join(__dirname, "../../benchmark-results/history-hiding");
 const NOTE = ethers.parseEther("0.01");

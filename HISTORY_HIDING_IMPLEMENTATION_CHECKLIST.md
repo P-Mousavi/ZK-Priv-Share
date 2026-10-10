@@ -75,7 +75,32 @@ integration test, and applicable negative tests have passed.
   - [x] Identity Merkle-root equality/membership remains explicitly excluded
     under the documented benchmark-PoC limitation; the identity leaf remains
     covered.
-- [ ] Phase 13 — Canonical real-proof end-to-end test.
-- [ ] Phase 14 — Security and negative-test matrix.
+- [x] Phase 13 — Canonical real-proof end-to-end test.
+  - [x] One test creates coordinated witnesses and uses fresh generated proofs
+    for state publication, identity access, rating, reward claim, and slashing.
+  - [x] The canonical path records accountability, acknowledgement, and
+    dispute resolution, then rejects repeated state publication, reward claim,
+    rating, and stake slash without deploying a mock verifier.
+  - [x] E2E delivery/acknowledgement use canonical commitment-only calls;
+    dispute resolution is threshold-authorized and reward issuance is a later
+    transaction by a separately authorized issuer.
+- [x] Phase 14 — Security and negative-test matrix.
+  - [x] Circuit/contract replay, malformed-proof, stale-root, stake,
+    accountability, reward, rating, slashing, and leakage cases are mapped to
+    enforcement-focused tests in `docs/history-hiding-security-matrix.md`.
+  - [x] Canonical E2E rejects direct owner dispute resolution and unauthorized
+    reward issuance; identity-root membership remains the documented exclusion.
 - [ ] Phase 15 — Real-proof benchmark suite.
-- [ ] Phase 16 — Implementation-accurate documentation.
+  - [x] Canonical benchmark command excludes mock-verifier measurements and
+    records repeated real-proof verification metrics in JSON/CSV.
+  - [x] Real state-proof scale measurements cover N=1, 10, 50, and 100.
+  - [x] Repeated real-proof transaction measurements cover reward insertion/
+    claim, rating, slashing, and the full canonical lifecycle.
+  - [ ] Separate compilation and witness-generation timing remains future
+    benchmark work; current `fullProve` scale timing includes both stages.
+- [x] Phase 16 — Implementation-accurate documentation.
+  - [x] README and History-hiding documentation distinguish canonical,
+    tested, benchmarked, legacy, and future-work paths.
+  - [x] Architecture, commitment formulas, nullifiers, all four trees,
+    accountability, access/dispute/slashing, rating, acknowledgement, threat
+    model, and accepted identity-root limitation are documented accurately.
