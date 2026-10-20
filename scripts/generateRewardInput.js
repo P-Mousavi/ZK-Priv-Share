@@ -101,7 +101,7 @@ class PoseidonMerkleTree {
 }
 
 async function generateRewardInput() {
-    const TREE_DEPTH = 5;
+    const TREE_DEPTH = 7;
     
     const poseidon = await buildPoseidon();
     

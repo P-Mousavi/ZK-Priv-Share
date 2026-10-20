@@ -12,7 +12,7 @@ async function generateRewardProof(secret, denomination = 1000000000000000000n, 
 
   // Create a Merkle tree with the commitment
   const leaves = [commitment, randomFieldElement(), randomFieldElement(), randomFieldElement()];
-  const { root, proofs } = await createMerkleTree(leaves, 5);
+  const { root, proofs } = await createMerkleTree(leaves, 7);
   const proof = proofs[0];
 
   // Compute nullifier hash
@@ -85,11 +85,11 @@ async function generateRewardTree(notes) {
   const leaves = notes.map(note => BigInt(note.commitment));
   
   // Pad with random elements if needed to reach power of 2
-  while (leaves.length < 32 && (leaves.length & (leaves.length - 1)) !== 0) {
+  while (leaves.length < 128 && (leaves.length & (leaves.length - 1)) !== 0) {
     leaves.push(randomFieldElement());
   }
   
-  const { root, proofs } = await createMerkleTree(leaves, 5);
+  const { root, proofs } = await createMerkleTree(leaves, 7);
   
   // Map proofs to notes
   const noteProofs = notes.map((note, index) => ({

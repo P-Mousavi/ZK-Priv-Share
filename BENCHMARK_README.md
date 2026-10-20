@@ -223,3 +223,57 @@ See [the implementation audit](docs/comparative-benchmark-audit.md). Canonical r
 The [20-trial report](benchmark-results/comparative/2026-10-10T11-38-53.918Z-357337/report.md) records 100 successful measured proofs across the five circuits. Deployment totals were 3,137,878 gas for original Priv-Share and 17,460,509 gas for canonical History-Hiding, an increase of 14,322,631 gas (456.44%) for the complete architecture sets. Combined witness/proving medians were 661.90 ms (identity), 1,326.65 ms (state), 733.56 ms (rating), 1,028.27 ms (slashing), and 705.07 ms (reward). These are measurements on the host recorded in the dataset, not general performance guarantees.
 
 A separate two-trial repeat at `benchmark-results/comparative/2026-10-10T11-41-43.861Z-359856/` confirmed matching JSON structure, CSV headers and exact deployment totals. The primary run's `validation.json`, `reproducibility.json`, `regression.json` and regression logs document finite-value checks, compiler equivalence, dataset preservation, production-verifier acceptance/malformed-proof rejection, and passing suites: 126 contract tests, 29 circuit tests, one canonical end-to-end test, four canonical benchmarks and four new measurement-rule tests. Failed development runs are retained with `execution.json.success: false` and must not be used as result datasets.
+
+## Current History-Hiding workload scalability
+
+The coverage audit is [docs/history-hiding-scalability-audit.md](docs/history-hiding-scalability-audit.md). Existing registration and fixed-depth state-proof scale benchmarks remain intact; the new command covers growing shared canonical state and real receipt workflows:
+
+```bash
+npm run test:history-hiding:scalability
+npm run benchmark:history-hiding:scalability
+
+# Short correctness smoke run (still real proofs and production verifiers)
+HH_SCALE_SIZES=1 HH_SCALE_REPETITIONS=1 npm run benchmark:history-hiding:scalability
+```
+
+Defaults are `HH_SCALE_SIZES=1,10,50,100` and `HH_SCALE_REPETITIONS=2`. An optional `HH_SCALE_OUT` must name a new directory; existing directories are rejected. Each run writes `results.json`, `workflow-summary.json`, and `report.md` in a unique `benchmark-results/history-hiding/scalability/<run>/`. Historical result files are never overwritten. Groth16 proving and Git provenance use child processes; the runner must be allowed to launch them. Compile with `npm run compile` first if using `--no-compile`.
+
+Metric definitions:
+
+- Operation gas is `gasUsed` from status-1 receipts. Each receipt record includes transaction hash, inputs, raw logs, contract/method, block, category and local send-through-receipt milliseconds. Reverted/capacity operations are failures, not successful samples.
+- Deployment receipts include constructors and nested IdentityTree deployment. Configuration calls are initialization. Neither is included in recurring workload gas. Identity registration and stake funding are recurring participant onboarding costs, shown as a separate stage.
+- CTI workload executes N participant registrations/stake deposits and sequential publications, access requests, delivery, acknowledgement, ratings, two-vote disputes and real proof-gated slashes on shared contracts. Workflow aggregates sum actual receipts in the same run. Registration, CTI/acknowledgement, rating, dispute/slashing and reward stages remain separately identifiable.
+- State is a depth-7 committed population of N pending leaves at deployment, then same-index private updates. It is **not** an on-chain insertion benchmark: the current contract has no empty-slot allocation method. Identity and stake append trees also have depth 7 / capacity 128.
+- Rewards append then claim on one depth-7 / capacity-128 tree. The default CTI sizes remain 1/10/50/100; two additional reward-only runs at 32 notes complete the reward progression 1/10/32/50/100. Every count is checked against receipts and final state. Full-capacity contract tests reject append 129 both before and after claims. Historical depth-5 runs at 50/100 completed only 32 notes and remain preserved. No automatic CTI reward-eligibility link exists.
+- Every identity/state/rating/slashing/reward proof is fresh `groth16.fullProve`; time combines witness generation and proving, excluding serialization, off-chain Merkle maintenance and on-chain verification. Inputs, public signals, calldata, proof size, verifier address and source/artifact hashes are recorded. Circuit depth remains fixed across populations.
+- Standalone verification gas is a successful transaction to the production verifier after a checked `eth_call` returns true. The proof is reused for this diagnostic probe and the protocol transaction. **Never add probe gas to workflow receipts**, which already include their own proof verification. Malformed proofs are checked against every verifier once per run.
+- Tree construction/maintenance milliseconds are local off-chain resource costs. Send-through-receipt time is local execution timing, not public-network throughput/latency. Summary count/mean/median/range/standard deviation distinguishes independent fresh deployments from successive transactions occupying different insertion positions.
+
+Interpretation retains the identity-circuit root-equality exception, unauthenticated recipient acknowledgement, accounting-only slashing, fixed reward capacity and unmatched baseline semantics. The report provides bounded observations, not extrapolated asymptotic complexity, public-chain fees, or anonymity claims.
+
+Validate a completed run's counts, successful receipts, proof configurations and all recomputed aggregates with:
+
+```bash
+HH_SCALE_RESULTS=benchmark-results/history-hiding/scalability/<run>/results.json npm run test:history-hiding:scalability:results
+```
+
+The verified default dataset is [the 2026-10-10 scalability report](benchmark-results/history-hiding/scalability/2026-10-10T18-47-17-618Z-384078/report.md), with [raw receipts/proofs](benchmark-results/history-hiding/scalability/2026-10-10T18-47-17-618Z-384078/results.json). A focused N=33 run additionally validates exact reward-capacity rejection. See the adjacent `validation.md` for commands, checks and pre-existing legacy failures. In particular, the older direct `ProofVerification.bench.js` currently fails on an obsolete identity witness field, and two mock `HistoryHidingExtended` cases fail on undefined `owner`. Their historical outputs are preserved; these cases are not counted as current canonical coverage.
+
+### Reward capacity regeneration and validation
+
+The reward contract and circuit use depth 7 (128 lifetime slots). New deployments must pair the regenerated verifier with the new tree. Old roots/proofs cannot migrate directly. Regenerate only the dependent reward artifacts using the same per-circuit pipeline as `build:groth16`:
+
+```bash
+node scripts/generateRewardInput.js
+bash scripts/build.sh -c reward -i reward_input.json
+npm run verify:groth16
+npm run test:reward-capacity
+npm run benchmark:history-hiding:scalability
+HH_SCALE_RESULTS=/absolute/new-run/results.json npm run test:history-hiding:scalability:results
+```
+
+`HH_SCALE_REWARD_EXTRA_SIZES` controls additional reward-only sizes (default 32 when running the default progression). These rows skip registration and CTI operations; their deployment/configuration receipts remain separate. `HH_SCALE_OUT` must point to a new directory. `HH_BENCHMARK_OUT` redirects the three canonical state/real-proof/scale outputs into a new directory with exclusive file creation; pair it with `HH_COMPARATIVE_OUT` for the lifecycle output. Comparative outputs may also be placed inside a new History-Hiding scalability run using `COMPARATIVE_OUT`, preserving all old baseline files.
+
+`HH_CAPACITY_METADATA_OUT=/absolute/new-file.json hardhat run --no-compile scripts/benchmarks/scalability/capacity-metadata.js` measures actual deployment gas, runtime bytecode and constructor SSTORE instruction counts; constructor initialization is included in deployment gas, while `setIssuer` is recorded separately. SSTORE instruction counts are not distinct persistent-slot counts.
+
+Updated depth-7 results: [capacity and scalability report](benchmark-results/history-hiding/scalability/2026-10-11T06-48-54-412Z-capacity-128/report.md), [raw workload receipts](benchmark-results/history-hiding/scalability/2026-10-11T06-48-54-412Z-capacity-128/workloads/results.json), and [validation](benchmark-results/history-hiding/scalability/2026-10-11T06-48-54-412Z-capacity-128/validation.md). Both runs completed all 100 reward notes and CTI workflows; the lifetime reward bound remains 128.

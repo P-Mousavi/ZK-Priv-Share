@@ -4,6 +4,7 @@ circuits/build/*
 node_modules/
 *.log
 !benchmark-results/comparative/**/*.log
+!benchmark-results/history-hiding/scalability/**/*.log
 .DS_Store
 Thumbs.db
 dist/

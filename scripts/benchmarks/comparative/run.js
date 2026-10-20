@@ -5,9 +5,17 @@ const { ROOT, outputDir, write, sha256, environment, provenance } = require('./c
 
 function preservedFiles() {
   const result = {};
+  // A comparative run nested in a new capacity report must exclude that
+  // active report directory (its logs change while this process runs).
+  const scalabilityRoot = path.join(ROOT, 'benchmark-results/history-hiding/scalability');
+  const activeRelative = process.env.COMPARATIVE_OUT && path.relative(scalabilityRoot, path.resolve(process.env.COMPARATIVE_OUT));
+  const activeCapacityRun = activeRelative && !activeRelative.startsWith('..') && !path.isAbsolute(activeRelative)
+    ? path.join(scalabilityRoot, activeRelative.split(path.sep)[0]) : null;
   const visit = (dir) => {
     for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
       const file = path.join(dir, entry.name);
+      if (file === activeCapacityRun) continue;
+      if (process.env.COMPARATIVE_OUT && file === path.resolve(process.env.COMPARATIVE_OUT)) continue;
       if (entry.isDirectory()) visit(file);
       else result[path.relative(ROOT, file)] = sha256(file);
     }
@@ -31,9 +39,12 @@ async function main() {
   const steps = [
     ['compile', [path.join(ROOT, 'node_modules/hardhat/internal/cli/cli.js'), 'compile']],
     ['deployment', [path.join(ROOT, 'node_modules/hardhat/internal/cli/cli.js'), 'run', '--no-compile', 'scripts/benchmarks/comparative/deployment.js']],
+    ['baseline-transaction-gas', [path.join(ROOT, 'node_modules/hardhat/internal/cli/cli.js'), 'run', '--no-compile', 'scripts/benchmarks/comparative/baseline-transaction-gas.js']],
+    ['history-hiding-transaction-gas', [path.join(ROOT, 'node_modules/hardhat/internal/cli/cli.js'), 'test', '--no-compile', 'test/benchmarks/HistoryHidingLifecycleRealProof.bench.js']],
     ['baseline-operations', [path.join(ROOT, 'node_modules/hardhat/internal/cli/cli.js'), 'run', '--no-compile', 'scripts/benchmarks/comparative/baseline-operations.js']],
     ['offchain', ['scripts/benchmarks/comparative/offchain.js']],
     ['verification', [path.join(ROOT, 'node_modules/hardhat/internal/cli/cli.js'), 'run', '--no-compile', 'scripts/benchmarks/comparative/verify.js']],
+    ['operations-report', ['scripts/benchmarks/comparative/operations-report.js']],
     ['report', ['scripts/benchmarks/comparative/report.js']]
   ];
   let failure = null;
@@ -42,7 +53,14 @@ async function main() {
     const log = fs.openSync(path.join(out, name + '.log'), 'wx');
     const startedAt = new Date().toISOString();
     const exitCode = await new Promise((resolve, reject) => {
-      const child = spawn(process.execPath, args, { cwd: ROOT, env: process.env, stdio: ['ignore', log, log] });
+      const childEnv = { ...process.env };
+      if (name === 'history-hiding-transaction-gas') childEnv.HH_COMPARATIVE_OUT = path.join(out, 'history-hiding-transaction-gas');
+      if (name === 'operations-report') {
+        childEnv.COMPARATIVE_OUT = path.join(out, 'operation-report');
+        childEnv.BASELINE_TRANSACTION_GAS = path.join(out, 'baseline-transaction-gas.json');
+        childEnv.HH_TRANSACTION_GAS = path.join(out, 'history-hiding-transaction-gas', 'canonical-lifecycle-real-proof.json');
+      }
+      const child = spawn(process.execPath, args, { cwd: ROOT, env: childEnv, stdio: ['ignore', log, log] });
       child.on('error', reject); child.on('exit', (code) => resolve(code));
     });
     fs.closeSync(log);

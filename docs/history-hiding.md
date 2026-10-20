@@ -128,3 +128,9 @@ npm run test:contracts
 npm run test:history-hiding
 npm run benchmark:history-hiding
 ```
+
+## Growing canonical workloads
+
+`npm run benchmark:history-hiding:scalability` executes shared-contract workloads with fresh production proofs at N=1,10,50,100, independently repeated twice. It complements the existing fixed-depth state proof experiment and one-item lifecycle benchmark. See [the coverage audit](history-hiding-scalability-audit.md) and [the benchmark guide](../BENCHMARK_README.md#current-history-hiding-workload-scalability). New run directories preserve historical outputs. State leaves are precommitted at initialization; canonical publication updates them rather than appending. The canonical reward tree and membership circuit now use depth 7, supporting 128 append-only notes per deployment. The default runner adds two reward-only 32-note batches and completes the requested sizes through 100 notes. Claims do not free slots. New depth-7 proving artifacts and RewardVerifier must be deployed together; depth-5 roots and proofs are incompatible. Old capacity-limited results remain historical references.
+
+Validated capacity-extension results and migration caveats are recorded in [the updated report](../benchmark-results/history-hiding/scalability/2026-10-11T06-48-54-412Z-capacity-128/report.md). The new measurements complete all 100 notes twice using generated proofs and the matching verifier; old capacity-limited runs remain historical references.

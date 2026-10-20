@@ -14,8 +14,11 @@ const artifactDir = (name) => path.join(ROOT, 'circuits/build/artifacts', name);
 const outputDir = () => {
   if (!process.env.COMPARATIVE_OUT) throw new Error('Run npm run benchmark:comparative, or set COMPARATIVE_OUT to a NEW output directory.');
   const dir = path.resolve(process.env.COMPARATIVE_OUT);
-  const relative = path.relative(path.join(ROOT, 'benchmark-results/comparative'), dir);
-  if (!relative || relative.startsWith('..') || path.isAbsolute(relative)) throw new Error('Output must be a run subdirectory of benchmark-results/comparative.');
+  const allowed = ['benchmark-results/comparative', 'benchmark-results/history-hiding/scalability'].some(base => {
+    const relative = path.relative(path.join(ROOT, base), dir);
+    return relative && !relative.startsWith('..') && !path.isAbsolute(relative);
+  });
+  if (!allowed) throw new Error('Output must be a new comparative or History-Hiding scalability run subdirectory.');
   fs.mkdirSync(dir, { recursive: true });
   return dir;
 };
@@ -47,6 +50,12 @@ function difference(baseline, history, comparable) {
   return { absolute: history - baseline, percentage: (history - baseline) / baseline * 100,
     direction: history > baseline ? 'increase' : history < baseline ? 'decrease' : 'unchanged' };
 }
+function receiptGas(receipt) {
+  if (!receipt || Number(receipt.status) !== 1) throw new Error('Cannot record gas from an unsuccessful transaction receipt');
+  const gasUsed = Number(receipt.gasUsed);
+  if (!Number.isSafeInteger(gasUsed) || gasUsed <= 0) throw new Error('Transaction receipt has invalid gasUsed');
+  return gasUsed;
+}
 function sourceManifest() {
   const files = [...new Set(git('ls-files', '--cached', '--others', '--exclude-standard', 'contracts', 'circuits', 'scripts', 'package.json', 'package-lock.json', 'hardhat.config.js').split('\n'))]
     .filter((file) => fs.existsSync(path.join(ROOT, file)));
@@ -66,4 +75,4 @@ function provenance() {
   return { baselineRevision: BASELINE, historyHidingRevision: git('rev-parse', 'HEAD'),
     branch: git('branch', '--show-current'), workingTreeStatus: git('status', '--short'), sourceSha256: sourceManifest() };
 }
-module.exports = { ROOT, BASELINE, CIRCUITS, VERIFIERS, git, sha256, artifactDir, outputDir, write, stats, csv, difference, environment, provenance, validate };
+module.exports = { ROOT, BASELINE, CIRCUITS, VERIFIERS, git, sha256, artifactDir, outputDir, write, stats, csv, difference, receiptGas, environment, provenance, validate };

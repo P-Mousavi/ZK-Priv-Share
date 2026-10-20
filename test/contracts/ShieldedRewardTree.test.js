@@ -6,6 +6,7 @@ const { randomFieldElement, poseidonHashArray } = require("../helpers/poseidon")
 const { generateNoteProof, proofToSolidity } = require("../helpers/rewardProofHelper");
 
 describe("ShieldedRewardTree", function () {
+  this.timeout(300000);
   const denomination = ethers.parseEther("1");
   let owner, claimant, tree, jsTree;
 
@@ -29,7 +30,7 @@ describe("ShieldedRewardTree", function () {
 
     const poseidon = await buildPoseidon();
     const hash = (inputs) => BigInt(poseidon.F.toString(poseidon(inputs.map(BigInt))));
-    jsTree = new IncrementalMerkleTree(hash, 5, 0n, 2);
+    jsTree = new IncrementalMerkleTree(hash, 7, 0n, 2);
   });
 
   async function issueAndProve() {
@@ -87,5 +88,57 @@ describe("ShieldedRewardTree", function () {
     const claim = tree.interface.getEvent("RewardClaimed");
     expect(issue.inputs.map((input) => input.type)).to.not.include("address");
     expect(claim.inputs.map((input) => input.type)).to.not.include("address");
+  });
+
+  it("appends 128 notes, proves early and deep membership, and keeps spent positions occupied", async function () {
+    expect(await tree.TREE_DEPTH()).to.equal(7n);
+    const notes = [];
+    for (let i = 0; i < 128; i++) {
+      const secret = BigInt(200000 + i), nullifier = BigInt(300000 + i);
+      const commitment = await poseidonHashArray([denomination, secret, nullifier]);
+      const receipt = await (await tree.issueRewardNote(commitment, denomination, { value: denomination })).wait();
+      expect(receipt.status).to.equal(1);
+      jsTree.insert(commitment);
+      expect(await tree.rewardRoot()).to.equal(jsTree.root);
+      expect(await tree.rewardLeafCount()).to.equal(BigInt(i + 1));
+      notes.push({ secret, nullifier, denomination, commitment });
+    }
+    const root = jsTree.root;
+    await expect(tree.issueRewardNote(123n, denomination, { value: denomination }))
+      .to.be.revertedWith("IncrementalBinaryTree: tree is full");
+    // All issuance finishes before any claim; the claimant never receives an
+    // identity or issuer authorization. Upper path bits are exercised at 127.
+    for (const index of [0, 32, 49, 99, 127]) {
+      const path = jsTree.createProof(index);
+      expect(jsTree.verifyProof(path)).to.equal(true);
+      const generated = await generateNoteProof(notes[index], root, path);
+      const p = await proofToSolidity(generated);
+      const [proofRoot, amount, nf] = p.pubSignals.map(BigInt);
+      expect(proofRoot).to.equal(root);
+      await expect(tree.connect(claimant).claimReward(p.pA, p.pB, p.pC, root + 1n, amount, nf))
+        .to.be.revertedWith("reward root is not current");
+      await expect(tree.connect(claimant).claimReward(p.pA, p.pB, p.pC, root, amount, nf + 1n))
+        .to.be.revertedWith("invalid reward proof");
+      const malformed = [...p.pA]; malformed[0] = 1n;
+      await expect(tree.connect(claimant).claimReward(malformed, p.pB, p.pC, root, amount, nf))
+        .to.be.revertedWith("invalid reward proof");
+      const balance = await ethers.provider.getBalance(claimant.address);
+      const receipt = await (await tree.connect(claimant).claimReward(p.pA, p.pB, p.pC, root, amount, nf)).wait();
+      expect(receipt.status).to.equal(1);
+      expect(await ethers.provider.getBalance(claimant.address) + receipt.fee).to.equal(balance + denomination);
+      expect(await tree.usedRewardNullifiers(nf)).to.equal(true);
+      await expect(tree.connect(claimant).claimReward(p.pA, p.pB, p.pC, root, amount, nf))
+        .to.be.revertedWith("reward nullifier already used");
+    }
+    const badPath = jsTree.createProof(99);
+    badPath.siblings[6][0] += 1n;
+    let rejected = false;
+    try { await generateNoteProof(notes[99], root, badPath); } catch (e) { rejected = /Assert Failed/.test(e.message); }
+    expect(rejected, "invalid upper-level membership witness must fail").to.equal(true);
+    expect(await tree.rewardRoot()).to.equal(root);
+    expect(await tree.rewardLeafCount()).to.equal(128n);
+    expect(await ethers.provider.getBalance(await tree.getAddress())).to.equal(123n * denomination);
+    await expect(tree.issueRewardNote(456n, denomination, { value: denomination }))
+      .to.be.revertedWith("IncrementalBinaryTree: tree is full");
   });
 });

@@ -45,4 +45,4 @@ template ClaimReward(levels) {
     nullifierHasher.out === nullifierHash;
 }
 
-component main {public [root, denomination, nullifierHash]} = ClaimReward(5);
+component main {public [root, denomination, nullifierHash]} = ClaimReward(7);

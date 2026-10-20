@@ -9,7 +9,7 @@ const { createMerkleTree } = require("../helpers/merkle");
 
 describe("Reward Circuit", () => {
   let circuit: any;
-  const LEVELS = 5;
+  const LEVELS = 7;
   const DENOMINATION = 1000000000000000000n;
 
   async function buildInput(overrides: any = {}) {

@@ -7,7 +7,7 @@ const path = require("path");
 const H = require("../../scripts/helpers/ctiCommitment");
 
 const ROOT = path.join(__dirname, "../../circuits/build/artifacts/state");
-const OUT = path.join(__dirname, "../../benchmark-results/history-hiding/state-scale.json");
+const OUT = path.join(process.env.HH_BENCHMARK_OUT || path.join(__dirname, "../../benchmark-results/history-hiding"), "state-scale.json");
 const SCALES = [1, 10, 50, 100];
 
 function stats(values) {
@@ -69,6 +69,6 @@ describe("History-hiding real state-proof scale benchmark", function () {
       rows.push({ scale: n, treeBuildMs: stats(treeBuildMs), fullProveMs: stats(provingMs) });
     }
     fs.mkdirSync(path.dirname(OUT), { recursive: true });
-    fs.writeFileSync(OUT, `${JSON.stringify({ circuit: "state", verifier: "generated Groth16", scales: rows }, null, 2)}\n`);
+    fs.writeFileSync(OUT, `${JSON.stringify({ circuit: "state", verifier: "generated Groth16", scales: rows }, null, 2)}\n`, process.env.HH_BENCHMARK_OUT ? { flag: "wx" } : undefined);
   });
 });

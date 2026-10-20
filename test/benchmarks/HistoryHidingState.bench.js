@@ -37,9 +37,9 @@ describe("History-hiding state benchmark", function () {
     const tx = await tree.submitPrivateCtiWithStateProof(calldata[0], calldata[1], calldata[2], ...generated.publicSignals.map(BigInt));
     const receipt = await tx.wait();
     const result = { provingTimeMs: provingMs, proofSizeBytes: Buffer.byteLength(JSON.stringify(generated.proof)), verificationGas: verificationGas.toString(), transitionGas: receipt.gasUsed.toString(), storageSlotsWritten: 2 };
-    const output = path.join(__dirname, "../../benchmark-results/history-hiding", "state-results.json");
+    const output = path.join(process.env.HH_BENCHMARK_OUT || path.join(__dirname, "../../benchmark-results/history-hiding"), "state-results.json");
     fs.mkdirSync(path.dirname(output), { recursive: true });
-    fs.writeFileSync(output, JSON.stringify(result, null, 2));
+    fs.writeFileSync(output, JSON.stringify(result, null, 2), process.env.HH_BENCHMARK_OUT ? { flag: "wx" } : undefined);
     expect(await tree.stateRoot()).to.equal(BigInt(generated.publicSignals[3]));
   });
 });

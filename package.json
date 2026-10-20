@@ -5,6 +5,7 @@
   "main": "index.js",
   "scripts": {
     "test": "npm run test:contracts",
+    "test:reward-capacity": "./node_modules/.bin/hardhat test test/contracts/ShieldedRewardTree.test.js test/contracts/PoseidonCompatibility.test.js",
     "test:contracts": "./node_modules/.bin/hardhat test test/contracts/*.test.js",
     "test:history-hiding": "./node_modules/.bin/hardhat test test/history-hiding/*.test.js",
     "test:circuits": "PATH=/home/spm/.cargo/bin:$PATH npx ts-mocha test/circuits/*.test.ts --timeout 300000",
@@ -22,7 +23,10 @@
     "benchmark:history-hiding:extended": "hardhat test test/benchmarks/HistoryHidingExtended.bench.js",
     "benchmark:history-hiding:real-proofs": "hardhat test test/benchmarks/HistoryHidingRealProof.bench.js",
     "compile": "./node_modules/.bin/hardhat compile",
-    "build": "npm run compile"
+    "build": "npm run compile",
+    "benchmark:history-hiding:scalability": "hardhat run scripts/benchmarks/scalability/run.js",
+    "test:history-hiding:scalability": "mocha --no-config test/history-hiding-scalability-metrics.test.js",
+    "test:history-hiding:scalability:results": "mocha --no-config test/history-hiding-scalability-results.test.js"
   },
   "keywords": [],
   "author": "",

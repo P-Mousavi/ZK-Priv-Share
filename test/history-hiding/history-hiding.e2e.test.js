@@ -159,7 +159,7 @@ describe("History-hiding canonical real-proof end-to-end", function () {
       .to.be.revertedWith("only reward issuer");
     await rewardTree.setIssuer(issuer.address, true);
     await rewardTree.connect(issuer).issueRewardNote(noteCommitment, denomination, { value: denomination });
-    const rewardJsTree = new IncrementalMerkleTree(hash, 5, 0n, 2);
+    const rewardJsTree = new IncrementalMerkleTree(hash, 7, 0n, 2);
     rewardJsTree.insert(noteCommitment);
     const rewardNullifier = await H.computeRewardNullifier(rewardSecret, noteCommitment);
     const rewardProof = await prove("reward", {

@@ -1,5 +1,5 @@
 const { expect } = require('chai');
-const { stats, difference, validate, csv } = require('../scripts/benchmarks/comparative/common');
+const { stats, difference, validate, csv, receiptGas } = require('../scripts/benchmarks/comparative/common');
 
 describe('Comparative benchmark measurement rules', function () {
   it('uses an arithmetic median for even samples and population deviation', function () {
@@ -18,6 +18,11 @@ describe('Comparative benchmark measurement rules', function () {
     expect(() => stats([])).to.throw('No samples');
     expect(() => validate({ metrics: [NaN] })).to.throw('Non-finite');
     expect(() => stats([1, Infinity])).to.throw('Non-finite');
+  });
+  it('extracts gas only from successful receipts with valid gasUsed', function () {
+    expect(receiptGas({ status: 1, gasUsed: 21000n })).to.equal(21000);
+    expect(() => receiptGas({ status: 0, gasUsed: 21000n })).to.throw('unsuccessful');
+    expect(() => receiptGas({ status: 1, gasUsed: 0n })).to.throw('invalid gasUsed');
   });
   it('escapes CSV fields containing commas, quotes and newlines', function () {
     expect(csv(['name'], [['a,"b"\nc']])).to.equal('"name"\n"a,""b""\nc"\n');

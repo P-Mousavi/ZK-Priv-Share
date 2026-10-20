@@ -18,7 +18,7 @@ interface IRewardProofVerifier {
 contract ShieldedRewardTree {
     using IncrementalBinaryTree for IncrementalTreeData;
 
-    uint256 public constant TREE_DEPTH = 5;
+    uint256 public constant TREE_DEPTH = 7;
     uint256 public constant DENOMINATION_0_001_ETH = 1e15;
     uint256 public constant DENOMINATION_0_01_ETH = 1e16;
     uint256 public constant DENOMINATION_0_1_ETH = 1e17;

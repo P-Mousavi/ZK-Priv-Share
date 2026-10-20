@@ -134,7 +134,7 @@ describe("Phase 12 canonical Poseidon compatibility matrix", function () {
 
     const rewardLeaves = [901n, 902n];
     const stakeLeaves = [1001n, 1002n];
-    const rewardJsTree = new IncrementalMerkleTree(jsHash, 5, 0n, 2);
+    const rewardJsTree = new IncrementalMerkleTree(jsHash, 7, 0n, 2);
     const stakeJsTree = new IncrementalMerkleTree(jsHash, 7, 0n, 2);
     for (const leaf of rewardLeaves) {
       await rewardTree.issueRewardNote(leaf, 1000000000000000n, { value: 1000000000000000n });

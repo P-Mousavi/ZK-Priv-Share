@@ -32,8 +32,8 @@ template PoseidonCompatibilityMatrix() {
 
 template CanonicalMerkleRoots() {
     signal input rewardLeaf;
-    signal input rewardPathElements[5];
-    signal input rewardPathIndices[5];
+    signal input rewardPathElements[7];
+    signal input rewardPathIndices[7];
     signal output rewardRoot;
 
     signal input stakeLeaf;
@@ -41,7 +41,7 @@ template CanonicalMerkleRoots() {
     signal input stakePathIndices[7];
     signal output stakeRoot;
 
-    component reward = MerkleTreeInclusionProof(5);
+    component reward = MerkleTreeInclusionProof(7);
     reward.leaf <== rewardLeaf;
     reward.pathElements <== rewardPathElements;
     reward.pathIndices <== rewardPathIndices;
